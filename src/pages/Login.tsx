@@ -147,6 +147,17 @@ export default function Login() {
         <p className="text-center text-sm text-muted-foreground mt-6">
           Having trouble? Contact your supervisor
         </p>
+
+        <div className="text-center mt-4">
+          <Button
+            variant="outline"
+            size="default"
+            className="w-full max-w-xs mx-auto"
+            onClick={() => navigate('/enroll')}
+          >
+            Enroll Now
+          </Button>
+        </div>
       </div>
 
       {/* Facial Scanner Modal */}

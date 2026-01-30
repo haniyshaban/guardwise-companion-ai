@@ -10,6 +10,9 @@ import CheckIn from "./pages/CheckIn";
 import Schedule from "./pages/Schedule";
 import Alerts from "./pages/Alerts";
 import Profile from "./pages/Profile";
+import EnrollmentForm from "./pages/EnrollmentForm";
+import LeaveManagement from "./pages/LeaveManagement";
+import PatrolMode from "./pages/PatrolMode";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -28,11 +31,14 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Login />} />
+      <Route path="/enroll" element={<EnrollmentForm />} />
       <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
       <Route path="/check-in" element={<ProtectedRoute><CheckIn /></ProtectedRoute>} />
       <Route path="/schedule" element={<ProtectedRoute><Schedule /></ProtectedRoute>} />
       <Route path="/alerts" element={<ProtectedRoute><Alerts /></ProtectedRoute>} />
       <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+      <Route path="/leave" element={<ProtectedRoute><LeaveManagement /></ProtectedRoute>} />
+      <Route path="/patrol" element={<ProtectedRoute><PatrolMode /></ProtectedRoute>} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );

@@ -2,11 +2,13 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, User, Phone, Mail, CreditCard, Shield, 
-  Settings, LogOut, ChevronRight, Camera, Award
+  Settings, LogOut, ChevronRight, Camera, Award, CalendarDays
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/contexts/AuthContext';
 import { BottomNav } from '@/components/BottomNav';
+import { PayslipViewer } from '@/components/PayslipViewer';
 
 export default function Profile() {
   const navigate = useNavigate();
@@ -17,10 +19,24 @@ export default function Profile() {
     navigate('/');
   };
 
+  const getOnboardingBadge = () => {
+    switch (guard?.onboardingStatus) {
+      case 'active':
+        return <Badge className="bg-accent/20 text-accent">Verified Guard</Badge>;
+      case 'verified':
+        return <Badge className="bg-warning/20 text-warning">Pending Activation</Badge>;
+      case 'pending':
+        return <Badge className="bg-secondary text-muted-foreground">Pending Verification</Badge>;
+      default:
+        return null;
+    }
+  };
+
   const menuItems = [
-    { icon: User, label: 'Personal Information', description: 'Update your details' },
+    { icon: User, label: 'Personal Information', description: 'Update your details', path: '/enroll' },
     { icon: Shield, label: 'Security Settings', description: 'Face ID, Password' },
     { icon: Award, label: 'Certifications', description: 'View your qualifications' },
+    { icon: CalendarDays, label: 'Leave History', description: 'View leave requests', path: '/leave' },
     { icon: Settings, label: 'App Settings', description: 'Notifications, Theme' },
   ];
 
@@ -52,9 +68,8 @@ export default function Profile() {
             <div>
               <h2 className="text-xl font-bold text-foreground">{guard?.name}</h2>
               <p className="text-primary font-mono">{guard?.employeeId}</p>
-              <div className="flex items-center gap-1 mt-1">
-                <div className="status-indicator status-active" />
-                <span className="text-sm text-muted-foreground">Verified Guard</span>
+              <div className="flex items-center gap-2 mt-1">
+                {getOnboardingBadge()}
               </div>
             </div>
           </div>
@@ -85,8 +100,8 @@ export default function Profile() {
                 <CreditCard className="w-5 h-5 text-muted-foreground" />
               </div>
               <div>
-                <p className="text-sm text-muted-foreground">Employee ID</p>
-                <p className="font-medium text-foreground font-mono">{guard?.employeeId}</p>
+                <p className="text-sm text-muted-foreground">Daily Rate</p>
+                <p className="font-medium text-foreground">₹{guard?.dailyRate?.toLocaleString('en-IN') || 'N/A'}/day</p>
               </div>
             </div>
           </div>
@@ -104,11 +119,37 @@ export default function Profile() {
           </div>
         </div>
 
+        {/* Uniform Balance */}
+        {guard?.uniformInstallments && guard.uniformInstallments.remainingAmount > 0 && (
+          <div className="glass-card p-4 mb-6">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm text-muted-foreground">Uniform Balance</span>
+              <span className="text-sm font-medium text-warning">
+                ₹{guard.uniformInstallments.remainingAmount.toLocaleString('en-IN')} remaining
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>Monthly deduction: ₹{guard.uniformInstallments.monthlyDeduction}</span>
+              <span>
+                {Math.ceil(guard.uniformInstallments.remainingAmount / guard.uniformInstallments.monthlyDeduction)} months left
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Payslip Viewer */}
+        {guard && (
+          <div className="mb-6">
+            <PayslipViewer guard={guard} />
+          </div>
+        )}
+
         {/* Menu Items */}
         <div className="space-y-2 mb-6">
           {menuItems.map((item) => (
             <button
               key={item.label}
+              onClick={() => item.path && navigate(item.path)}
               className="w-full glass-card p-4 flex items-center justify-between hover:bg-white/5 transition-colors"
             >
               <div className="flex items-center gap-3">

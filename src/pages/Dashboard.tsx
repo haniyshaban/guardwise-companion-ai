@@ -1,17 +1,48 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   MapPin, Clock, LogIn, LogOut, Shield, ChevronRight, 
-  AlertTriangle, CheckCircle, TrendingUp 
+  AlertTriangle, CheckCircle, TrendingUp, Bell, Truck,
+  Navigation, CalendarDays, Moon
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
+import { Progress } from '@/components/ui/progress';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { BottomNav } from '@/components/BottomNav';
+import { useToast } from '@/hooks/use-toast';
+import { WakeAlert } from '@/types/guard';
+
+// Wake Alert constants
+const WAKE_ALERT_TIMEOUT = 120; // 120 seconds to respond
+const MIN_WAKE_INTERVAL = 30 * 60 * 1000; // 30 minutes minimum
+const MAX_WAKE_INTERVAL = 90 * 60 * 1000; // 90 minutes maximum
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const { guard } = useAuth();
+  const { toast } = useToast();
   const [isCheckedIn, setIsCheckedIn] = useState(false);
+  
+  // Transport mode state
+  const [isTransportMode, setIsTransportMode] = useState(false);
+  const [transportStartTime, setTransportStartTime] = useState<Date | null>(null);
+  
+  // Wake alert state
+  const [wakeAlertActive, setWakeAlertActive] = useState(false);
+  const [wakeAlertTimer, setWakeAlertTimer] = useState(WAKE_ALERT_TIMEOUT);
+  const [wakeAlertTriggeredAt, setWakeAlertTriggeredAt] = useState<Date | null>(null);
+  const [wakeAlertLogs, setWakeAlertLogs] = useState<WakeAlert[]>([]);
+  const wakeIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const wakeCountdownRef = useRef<NodeJS.Timeout | null>(null);
 
   const currentTime = new Date().toLocaleTimeString('en-US', {
     hour: '2-digit',
@@ -25,14 +56,205 @@ export default function Dashboard() {
     day: 'numeric',
   });
 
+  // Check if current shift is a night shift
+  const isNightShift = useCallback(() => {
+    if (!guard?.currentShift) return false;
+    const startHour = parseInt(guard.currentShift.startTime.split(':')[0]);
+    // Night shift: starts between 8PM (20) and 6AM (6)
+    return startHour >= 20 || startHour < 6 || guard.currentShift.isNightShift;
+  }, [guard]);
+
+  // Generate random interval for wake alerts
+  const getRandomInterval = () => {
+    return Math.floor(Math.random() * (MAX_WAKE_INTERVAL - MIN_WAKE_INTERVAL)) + MIN_WAKE_INTERVAL;
+  };
+
+  // Trigger wake alert
+  const triggerWakeAlert = useCallback(() => {
+    if (!isCheckedIn || !isNightShift()) return;
+    
+    setWakeAlertActive(true);
+    setWakeAlertTimer(WAKE_ALERT_TIMEOUT);
+    setWakeAlertTriggeredAt(new Date());
+
+    // Start countdown
+    wakeCountdownRef.current = setInterval(() => {
+      setWakeAlertTimer(prev => {
+        if (prev <= 1) {
+          // Time's up - missed alert
+          clearInterval(wakeCountdownRef.current!);
+          handleWakeAlertMissed();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }, [isCheckedIn, isNightShift]);
+
+  // Handle wake alert response
+  const handleWakeAlertResponse = () => {
+    if (wakeCountdownRef.current) {
+      clearInterval(wakeCountdownRef.current);
+    }
+
+    const responseTime = wakeAlertTriggeredAt 
+      ? Math.round((Date.now() - wakeAlertTriggeredAt.getTime()) / 1000)
+      : 0;
+
+    const log: WakeAlert = {
+      id: `wa-${Date.now()}`,
+      guardId: guard?.id || '1',
+      shiftId: guard?.currentShift?.id,
+      triggeredAt: wakeAlertTriggeredAt?.toISOString() || new Date().toISOString(),
+      respondedAt: new Date().toISOString(),
+      status: 'success',
+      responseTimeSeconds: responseTime,
+    };
+
+    setWakeAlertLogs(prev => [...prev, log]);
+    setWakeAlertActive(false);
+    setWakeAlertTriggeredAt(null);
+
+    toast({
+      title: 'Alert Acknowledged',
+      description: `Response time: ${responseTime} seconds. Stay alert!`,
+    });
+
+    // Schedule next wake alert
+    scheduleNextWakeAlert();
+  };
+
+  // Handle missed wake alert
+  const handleWakeAlertMissed = () => {
+    const log: WakeAlert = {
+      id: `wa-${Date.now()}`,
+      guardId: guard?.id || '1',
+      shiftId: guard?.currentShift?.id,
+      triggeredAt: wakeAlertTriggeredAt?.toISOString() || new Date().toISOString(),
+      status: 'missed',
+    };
+
+    setWakeAlertLogs(prev => [...prev, log]);
+    setWakeAlertActive(false);
+    setWakeAlertTriggeredAt(null);
+
+    toast({
+      title: 'Alert Missed!',
+      description: 'You did not respond in time. This has been logged.',
+      variant: 'destructive',
+    });
+
+    // Schedule next wake alert
+    scheduleNextWakeAlert();
+  };
+
+  // Schedule next wake alert
+  const scheduleNextWakeAlert = useCallback(() => {
+    if (wakeIntervalRef.current) {
+      clearTimeout(wakeIntervalRef.current);
+    }
+
+    if (!isCheckedIn || !isNightShift()) return;
+
+    const interval = getRandomInterval();
+    console.log(`Next wake alert in ${Math.round(interval / 60000)} minutes`);
+    
+    wakeIntervalRef.current = setTimeout(() => {
+      triggerWakeAlert();
+    }, interval);
+  }, [isCheckedIn, isNightShift, triggerWakeAlert]);
+
+  // Start wake alert system when checked in during night shift
+  useEffect(() => {
+    if (isCheckedIn && isNightShift()) {
+      // Start with first alert after 5 minutes for demo
+      wakeIntervalRef.current = setTimeout(() => {
+        triggerWakeAlert();
+      }, 5 * 60 * 1000); // 5 minutes for demo
+    }
+
+    return () => {
+      if (wakeIntervalRef.current) {
+        clearTimeout(wakeIntervalRef.current);
+      }
+      if (wakeCountdownRef.current) {
+        clearInterval(wakeCountdownRef.current);
+      }
+    };
+  }, [isCheckedIn, isNightShift, triggerWakeAlert]);
+
+  // Handle transport mode toggle
+  const handleTransportToggle = (enabled: boolean) => {
+    setIsTransportMode(enabled);
+    if (enabled) {
+      setTransportStartTime(new Date());
+      toast({
+        title: 'Transport Mode Activated',
+        description: 'Location updates every 30 seconds. Stay safe!',
+      });
+    } else {
+      setTransportStartTime(null);
+      toast({
+        title: 'Transport Mode Deactivated',
+        description: 'Normal tracking resumed.',
+      });
+    }
+  };
+
   const stats = [
     { label: 'Hours This Week', value: '32.5', trend: '+2.5' },
     { label: 'On-Time Rate', value: '98%', trend: '+3%' },
     { label: 'Incidents', value: '0', trend: '0' },
   ];
 
+  // Wake alert stats for night shift
+  const wakeAlertStats = {
+    total: wakeAlertLogs.length,
+    success: wakeAlertLogs.filter(l => l.status === 'success').length,
+    missed: wakeAlertLogs.filter(l => l.status === 'missed').length,
+  };
+
   return (
     <div className="min-h-screen bg-background pb-20">
+      {/* Wake Alert Dialog */}
+      <Dialog open={wakeAlertActive} onOpenChange={() => {}}>
+        <DialogContent className="sm:max-w-md" onPointerDownOutside={(e) => e.preventDefault()}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-warning">
+              <Bell className="w-6 h-6 animate-pulse" />
+              Wake-Up Check!
+            </DialogTitle>
+            <DialogDescription>
+              Press the button below to confirm you're awake and alert.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-6 py-4">
+            <div className="text-center">
+              <p className="text-5xl font-bold font-mono text-foreground mb-2">
+                {wakeAlertTimer}
+              </p>
+              <p className="text-sm text-muted-foreground">seconds remaining</p>
+            </div>
+
+            <Progress 
+              value={(wakeAlertTimer / WAKE_ALERT_TIMEOUT) * 100} 
+              className="h-2"
+            />
+
+            <Button 
+              variant="gradient" 
+              size="xl" 
+              className="w-full"
+              onClick={handleWakeAlertResponse}
+            >
+              <CheckCircle className="w-6 h-6 mr-2" />
+              I'm Awake!
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Header */}
       <div className="p-6 pt-8">
         <div className="flex items-start justify-between mb-6">
@@ -43,6 +265,18 @@ export default function Dashboard() {
             </h1>
           </div>
           <div className="flex items-center gap-2">
+            {isTransportMode && (
+              <Badge variant="outline" className="bg-warning/20 text-warning border-warning animate-pulse">
+                <Truck className="w-3 h-3 mr-1" />
+                Transit
+              </Badge>
+            )}
+            {isNightShift() && isCheckedIn && (
+              <Badge variant="outline" className="bg-primary/20 text-primary border-primary">
+                <Moon className="w-3 h-3 mr-1" />
+                Night
+              </Badge>
+            )}
             <div className={`status-indicator ${isCheckedIn ? 'status-active' : 'status-offline'}`} />
             <span className="text-sm font-medium text-foreground">
               {isCheckedIn ? 'On Duty' : 'Off Duty'}
@@ -55,6 +289,12 @@ export default function Dashboard() {
           <div className="flex items-center gap-2 text-primary mb-3">
             <Shield className="w-4 h-4" />
             <span className="text-sm font-medium uppercase tracking-wide">Current Shift</span>
+            {isNightShift() && (
+              <Badge variant="secondary" className="ml-auto">
+                <Moon className="w-3 h-3 mr-1" />
+                Night Shift
+              </Badge>
+            )}
           </div>
 
           <div className="flex items-center justify-between mb-4">
@@ -98,6 +338,51 @@ export default function Dashboard() {
             )}
           </div>
         </div>
+
+        {/* Transport Mode Toggle (only when checked in) */}
+        {isCheckedIn && (
+          <div className="glass-card p-4 mb-6 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className={`w-10 h-10 rounded-lg ${isTransportMode ? 'bg-warning/20' : 'bg-secondary'} flex items-center justify-center`}>
+                <Truck className={`w-5 h-5 ${isTransportMode ? 'text-warning' : 'text-muted-foreground'}`} />
+              </div>
+              <div>
+                <p className="font-medium text-foreground">Material Transport</p>
+                <p className="text-sm text-muted-foreground">
+                  {isTransportMode ? 'Active - 30s GPS updates' : 'Enable for transport duty'}
+                </p>
+              </div>
+            </div>
+            <Switch
+              checked={isTransportMode}
+              onCheckedChange={handleTransportToggle}
+            />
+          </div>
+        )}
+
+        {/* Night Shift Wake Alert Stats */}
+        {isNightShift() && isCheckedIn && wakeAlertLogs.length > 0 && (
+          <div className="glass-card p-4 mb-6">
+            <div className="flex items-center gap-2 mb-3">
+              <Bell className="w-4 h-4 text-primary" />
+              <span className="text-sm font-medium text-foreground">Wake-Up Checks</span>
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div>
+                <p className="text-lg font-bold text-foreground">{wakeAlertStats.total}</p>
+                <p className="text-xs text-muted-foreground">Total</p>
+              </div>
+              <div>
+                <p className="text-lg font-bold text-accent">{wakeAlertStats.success}</p>
+                <p className="text-xs text-muted-foreground">Passed</p>
+              </div>
+              <div>
+                <p className="text-lg font-bold text-destructive">{wakeAlertStats.missed}</p>
+                <p className="text-xs text-muted-foreground">Missed</p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Stats Grid */}
         <div className="grid grid-cols-3 gap-3 mb-6">
@@ -148,15 +433,32 @@ export default function Dashboard() {
           </button>
 
           <button 
+            onClick={() => navigate('/patrol')}
             className="w-full glass-card p-4 flex items-center justify-between hover:bg-white/5 transition-colors"
           >
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-lg bg-accent/20 flex items-center justify-center">
-                <MapPin className="w-5 h-5 text-accent" />
+                <Navigation className="w-5 h-5 text-accent" />
               </div>
               <div className="text-left">
-                <p className="font-medium text-foreground">Location Check</p>
-                <p className="text-sm text-muted-foreground">Verify patrol points</p>
+                <p className="font-medium text-foreground">Patrol Mode</p>
+                <p className="text-sm text-muted-foreground">Check-in at patrol points</p>
+              </div>
+            </div>
+            <ChevronRight className="w-5 h-5 text-muted-foreground" />
+          </button>
+
+          <button 
+            onClick={() => navigate('/leave')}
+            className="w-full glass-card p-4 flex items-center justify-between hover:bg-white/5 transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center">
+                <CalendarDays className="w-5 h-5 text-muted-foreground" />
+              </div>
+              <div className="text-left">
+                <p className="font-medium text-foreground">Request Leave</p>
+                <p className="text-sm text-muted-foreground">Apply for time off</p>
               </div>
             </div>
             <ChevronRight className="w-5 h-5 text-muted-foreground" />

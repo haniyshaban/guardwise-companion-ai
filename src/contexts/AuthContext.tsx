@@ -7,6 +7,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<boolean>;
   loginWithFace: () => Promise<boolean>;
   logout: () => void;
+  updateGuard: (updates: Partial<Guard>) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -18,13 +19,39 @@ const mockGuard: Guard = {
   employeeId: 'GW-2024-0147',
   phone: '+91 98765 43210',
   status: 'off-duty',
+  isActive: true,
+  onboardingStatus: 'active',
+  dailyRate: 800,
+  dateOfJoining: '2024-01-15',
+  address: '123 Main Street, Bangalore',
+  emergencyContact: '+91 98765 43211',
+  documents: {
+    aadharNumber: 'xxxx-xxxx-1234',
+    panNumber: 'AAAAA1111A',
+    photographUrl: undefined,
+    relievingLetterUrl: undefined,
+  },
+  bankDetails: {
+    accountNumber: '1234567890',
+    ifsc: 'SBIN0000000',
+    bankName: 'State Bank of India',
+    accountHolderName: 'Rajesh Kumar',
+  },
+  uniformInstallments: {
+    totalAmount: 3000,
+    remainingAmount: 1500,
+    monthlyDeduction: 500,
+    startDate: '2024-01-15',
+  },
   currentShift: {
     id: 's1',
     date: new Date().toISOString().split('T')[0],
     startTime: '08:00',
     endTime: '16:00',
     location: 'Tech Park - Building A',
+    siteId: 'site-1',
     status: 'scheduled',
+    isNightShift: false,
   },
 };
 
@@ -52,6 +79,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setGuard(null);
   };
 
+  const updateGuard = (updates: Partial<Guard>) => {
+    if (guard) {
+      setGuard({ ...guard, ...updates });
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -60,6 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         login,
         loginWithFace,
         logout,
+        updateGuard,
       }}
     >
       {children}
