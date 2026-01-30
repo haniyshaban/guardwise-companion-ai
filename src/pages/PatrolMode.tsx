@@ -37,7 +37,7 @@ interface PatrolPointStatus extends PatrolPoint {
 
 export default function PatrolMode() {
   const navigate = useNavigate();
-  const { guard } = useAuth();
+  const { guard, site } = useAuth();
   const { toast } = useToast();
 
   const [patrolPoints, setPatrolPoints] = useState<PatrolPointStatus[]>([]);
@@ -48,6 +48,7 @@ export default function PatrolMode() {
   const [patrolLogs, setPatrolLogs] = useState<PatrolLog[]>([]);
   const [patrolStartTime, setPatrolStartTime] = useState<Date | null>(null);
   const [viewMode, setViewMode] = useState<'map' | 'list'>('map');
+  const [siteName, setSiteName] = useState<string>('');
 
   // Determine the next point (first incomplete point by order)
   const nextPoint = useMemo(() => {
@@ -56,16 +57,35 @@ export default function PatrolMode() {
       .find(p => !p.isCompleted);
   }, [patrolPoints]);
 
-  // Initialize patrol points with status
+  // Initialize patrol points from site's patrol route or fallback to mock
   useEffect(() => {
-    const points: PatrolPointStatus[] = MOCK_PATROL_POINTS.map((point) => ({
-      ...point,
-      isCompleted: false,
-    }));
+    let points: PatrolPointStatus[] = [];
+    
+    // Try to use patrol route from logged-in guard's site
+    if (site?.patrolRoute && site.patrolRoute.length > 0) {
+      setSiteName(site.name);
+      points = site.patrolRoute.map((checkpoint: any) => ({
+        id: checkpoint.id,
+        siteId: site.id,
+        name: checkpoint.name,
+        latitude: checkpoint.latitude,
+        longitude: checkpoint.longitude,
+        radiusMeters: checkpoint.radiusMeters || 15,
+        order: checkpoint.order,
+        isCompleted: false,
+      }));
+    } else {
+      // Fallback to mock patrol points
+      points = MOCK_PATROL_POINTS.map((point) => ({
+        ...point,
+        isCompleted: false,
+      }));
+    }
+    
     setPatrolPoints(points);
     setPatrolStartTime(new Date());
     getLocation();
-  }, []);
+  }, [site]);
 
   // Get current location
   const getLocation = async () => {
@@ -233,7 +253,7 @@ export default function PatrolMode() {
           <div>
             <h1 className="text-2xl font-bold text-foreground">Patrol Mode</h1>
             <p className="text-sm text-muted-foreground">
-              Check-in at each patrol point
+              {siteName ? siteName : 'Check-in at each patrol point'}
             </p>
           </div>
           <div className="flex items-center gap-2">
