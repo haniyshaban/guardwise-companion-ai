@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/contexts/AuthContext';
 import { BottomNav } from '@/components/BottomNav';
 import { PayslipViewer } from '@/components/PayslipViewer';
+import { API_BASE_URL } from '@/lib/utils';
 
 export default function Profile() {
   const navigate = useNavigate();
@@ -24,7 +25,7 @@ export default function Profile() {
     const fetchStats = async () => {
       if (!guard?.id) return;
       try {
-        const res = await fetch(`http://localhost:4000/api/stats/guard/${guard.id}`);
+        const res = await fetch(`${API_BASE_URL}/api/stats/guard/${guard.id}`);
         if (res.ok) {
           const data = await res.json();
           setProfileStats(data);

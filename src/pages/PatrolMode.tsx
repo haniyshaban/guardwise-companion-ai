@@ -20,6 +20,7 @@ import { BottomNav } from '@/components/BottomNav';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { PatrolPoint, PatrolLog } from '@/types/guard';
+import { API_BASE_URL } from '@/lib/utils';
 import PatrolMap from '@/components/PatrolMap';
 import {
   getCurrentPosition,
@@ -177,7 +178,7 @@ export default function PatrolMode() {
 
       // Persist to API
       try {
-        const res = await fetch('http://localhost:4000/api/patrol-logs', {
+        const res = await fetch(`${API_BASE_URL}/api/patrol-logs`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(logData),

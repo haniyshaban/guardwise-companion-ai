@@ -6,10 +6,10 @@ import { FacialScanner } from '@/components/FacialScanner';
 import { useAuth } from '@/contexts/AuthContext';
 import { BottomNav } from '@/components/BottomNav';
 import { useToast } from '@/hooks/use-toast';
+import { API_BASE_URL } from '@/lib/utils';
+import { calculateDistance } from '@/services/GeolocationService';
 
 type CheckInStep = 'confirm' | 'scanning' | 'submitting' | 'success';
-
-const API_BASE = 'http://localhost:4000/api';
 
 export default function CheckIn() {
   const navigate = useNavigate();
@@ -54,7 +54,7 @@ export default function CheckIn() {
         }
 
         // Log attendance to API
-        const res = await fetch(`${API_BASE}/attendance/clock-in`, {
+        const res = await fetch(`${API_BASE_URL}/api/attendance/clock-in`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -71,7 +71,7 @@ export default function CheckIn() {
         }
 
         // Create notification for successful check-in
-        await fetch(`${API_BASE}/notifications`, {
+        await fetch(`${API_BASE_URL}/api/notifications`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

@@ -31,9 +31,7 @@ import {
   cancelConveyanceRequest,
   ConveyanceRequest 
 } from '@/services/GuardAPI';
-
-// API Base URL
-const API_BASE_URL = 'http://localhost:4000';
+import { API_BASE_URL } from '@/lib/utils';
 
 // Location sync interval (30 seconds)
 const LOCATION_SYNC_INTERVAL = 30 * 1000;

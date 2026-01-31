@@ -7,7 +7,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { BottomNav } from '@/components/BottomNav';
 import { useAuth } from '@/contexts/AuthContext';
-import { cn } from '@/lib/utils';
+import { cn, API_BASE_URL } from '@/lib/utils';
 
 interface ScheduledShift {
   id: string;
@@ -18,8 +18,6 @@ interface ScheduledShift {
   status: 'upcoming' | 'completed' | 'today';
   isNightShift: boolean;
 }
-
-const API_BASE = 'http://localhost:4000/api';
 
 export default function Schedule() {
   const navigate = useNavigate();
@@ -42,7 +40,7 @@ export default function Schedule() {
         to.setDate(today.getDate() + 14);
 
         const res = await fetch(
-          `${API_BASE}/schedules/${guard.id}?from=${from.toISOString().slice(0,10)}&to=${to.toISOString().slice(0,10)}`
+          `${API_BASE_URL}/api/schedules/${guard.id}?from=${from.toISOString().slice(0,10)}&to=${to.toISOString().slice(0,10)}`
         );
         
         if (res.ok) {

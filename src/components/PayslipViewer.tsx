@@ -24,9 +24,7 @@ import {
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Guard, PayrollRecord, AttendanceLog } from '@/types/guard';
-
-// API Base URL
-const API_BASE_URL = 'http://localhost:4000';
+import { API_BASE_URL } from '@/lib/utils';
 
 interface PayslipViewerProps {
   guard: Guard;

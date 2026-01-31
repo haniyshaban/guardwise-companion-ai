@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Bell, AlertTriangle, Info, CheckCircle, Clock, Loader2 } from 'lucide-react';
 import { BottomNav } from '@/components/BottomNav';
 import { useAuth } from '@/contexts/AuthContext';
-import { cn } from '@/lib/utils';
+import { cn, API_BASE_URL } from '@/lib/utils';
 
 interface Alert {
   id: string;
@@ -13,8 +13,6 @@ interface Alert {
   timestamp: string;
   read: boolean;
 }
-
-const API_BASE = 'http://localhost:4000/api';
 
 export default function Alerts() {
   const navigate = useNavigate();
@@ -27,7 +25,7 @@ export default function Alerts() {
     
     const fetchNotifications = async () => {
       try {
-        const res = await fetch(`${API_BASE}/notifications/${guard.id}`);
+        const res = await fetch(`${API_BASE_URL}/api/notifications/${guard.id}`);
         if (res.ok) {
           const data = await res.json();
           setAlerts(data.map((n: any) => ({
@@ -69,7 +67,7 @@ export default function Alerts() {
 
   const markAsRead = async (alertId: string) => {
     try {
-      await fetch(`${API_BASE}/notifications/${alertId}/read`, { method: 'PUT' });
+      await fetch(`${API_BASE_URL}/api/notifications/${alertId}/read`, { method: 'PUT' });
       setAlerts(prev => prev.map(a => 
         a.id === alertId ? { ...a, read: true } : a
       ));
@@ -81,7 +79,7 @@ export default function Alerts() {
   const markAllAsRead = async () => {
     if (!guard?.id) return;
     try {
-      await fetch(`${API_BASE}/notifications/${guard.id}/read-all`, { method: 'PUT' });
+      await fetch(`${API_BASE_URL}/api/notifications/${guard.id}/read-all`, { method: 'PUT' });
       setAlerts(prev => prev.map(a => ({ ...a, read: true })));
     } catch (err) {
       console.error('Failed to mark all as read:', err);

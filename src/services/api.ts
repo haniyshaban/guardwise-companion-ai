@@ -1,6 +1,8 @@
 // API Configuration and base service
 // Points to the guardwise-platform Express server
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
+import { API_BASE_URL as BASE_URL } from '@/lib/utils';
+
+const API_BASE_URL = BASE_URL + '/api';
 
 export interface ApiResponse<T> {
   success: boolean;

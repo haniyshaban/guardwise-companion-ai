@@ -14,6 +14,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import api from '@/services/api';
 import { FacialScanner } from '@/components/FacialScanner';
 import { descriptorToString } from '@/services/FaceApiService';
+import { API_BASE_URL } from '@/lib/utils';
 
 type EnrollmentStep = 'personal' | 'face' | 'documents' | 'success';
 
@@ -196,7 +197,7 @@ export default function EnrollmentForm() {
       const formData = new FormData();
       formData.append('file', file);
       
-      const response = await fetch('http://localhost:4000/api/upload', {
+      const response = await fetch(`${API_BASE_URL}/api/upload`, {
         method: 'POST',
         body: formData,
       });
