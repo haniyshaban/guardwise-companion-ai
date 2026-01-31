@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, User, Phone, Mail, CreditCard, Shield, 
@@ -13,6 +13,28 @@ import { PayslipViewer } from '@/components/PayslipViewer';
 export default function Profile() {
   const navigate = useNavigate();
   const { guard, logout } = useAuth();
+  const [profileStats, setProfileStats] = useState({
+    shiftsCompleted: 0,
+    attendanceRate: 0,
+    patrolsCompleted: 0
+  });
+
+  // Fetch profile stats from API
+  useEffect(() => {
+    const fetchStats = async () => {
+      if (!guard?.id) return;
+      try {
+        const res = await fetch(`http://localhost:4000/api/stats/guard/${guard.id}`);
+        if (res.ok) {
+          const data = await res.json();
+          setProfileStats(data);
+        }
+      } catch (e) {
+        console.log('Could not fetch guard stats', e);
+      }
+    };
+    fetchStats();
+  }, [guard?.id]);
 
   const handleLogout = () => {
     logout();
@@ -33,7 +55,7 @@ export default function Profile() {
   };
 
   const menuItems = [
-    { icon: User, label: 'Personal Information', description: 'Update your details', path: '/enroll' },
+    { icon: User, label: 'Personal Information', description: 'View & update your details', path: '/personal-info' },
     { icon: Shield, label: 'Security Settings', description: 'Face ID, Password' },
     { icon: Award, label: 'Certifications', description: 'View your qualifications' },
     { icon: CalendarDays, label: 'Leave History', description: 'View leave requests', path: '/leave' },
@@ -110,11 +132,11 @@ export default function Profile() {
         {/* Stats */}
         <div className="grid grid-cols-2 gap-3 mb-6">
           <div className="glass-card p-4 text-center">
-            <p className="text-3xl font-bold text-foreground">156</p>
+            <p className="text-3xl font-bold text-foreground">{profileStats.shiftsCompleted}</p>
             <p className="text-sm text-muted-foreground">Shifts Completed</p>
           </div>
           <div className="glass-card p-4 text-center">
-            <p className="text-3xl font-bold text-accent">98%</p>
+            <p className="text-3xl font-bold text-accent">{profileStats.attendanceRate}%</p>
             <p className="text-sm text-muted-foreground">Attendance Rate</p>
           </div>
         </div>

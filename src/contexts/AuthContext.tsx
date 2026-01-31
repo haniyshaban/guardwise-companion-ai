@@ -28,15 +28,23 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
-  loginWithFace: () => Promise<boolean>;
+  loginWithFace: (guardId?: string) => Promise<boolean>;
   logout: () => void;
   updateGuard: (updates: Partial<Guard>) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Fallback mock guard for facial recognition demo
-const mockGuard: Guard = {
+/**
+ * OFFLINE DEMO FALLBACK
+ * This mock guard is ONLY used when:
+ * 1. The API server is not reachable (offline mode)
+ * 2. Face recognition login is attempted without network
+ * 
+ * In production, this should be replaced with proper offline caching
+ * of the last authenticated guard from the database.
+ */
+const DEMO_FALLBACK_GUARD: Guard = {
   id: 'demo-guard-1',
   name: 'Rajesh Kumar',
   email: 'rajesh.kumar@guardwise.com',
@@ -122,6 +130,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (response.success && response.data?.guard) {
         // Map API response to Guard type
         const apiGuard = response.data.guard;
+        const isNightShift = apiGuard.shiftType === 'night';
         const mappedGuard: Guard = {
           id: apiGuard.id,
           name: apiGuard.name,
@@ -131,15 +140,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           status: apiGuard.clockedIn ? 'active' : 'off-duty',
           isActive: true,
           onboardingStatus: 'active',
+          // Personal details from API
+          address: apiGuard.address || undefined,
+          emergencyContact: apiGuard.emergencyContact || undefined,
+          dailyRate: apiGuard.dailyRate || undefined,
+          dateOfJoining: apiGuard.dateOfJoining || undefined,
+          // Documents (masked from API for security)
+          documents: {
+            aadharNumber: apiGuard.aadharNumber || undefined,
+            panNumber: apiGuard.panNumber || undefined,
+            photographUrl: undefined,
+            relievingLetterUrl: undefined,
+          },
+          // Bank details from API
+          bankDetails: apiGuard.bankDetails || undefined,
+          // Current shift based on guard's assigned shift type
           currentShift: apiGuard.siteId ? {
             id: `shift-${Date.now()}`,
             date: new Date().toISOString().split('T')[0],
-            startTime: '08:00',
-            endTime: '20:00',
+            startTime: apiGuard.shiftStartTime || (isNightShift ? '20:00' : '08:00'),
+            endTime: apiGuard.shiftEndTime || (isNightShift ? '08:00' : '20:00'),
             location: response.data.site?.name || 'Assigned Site',
             siteId: apiGuard.siteId,
             status: 'scheduled',
-            isNightShift: false,
+            isNightShift: isNightShift,
           } : undefined,
         };
 
@@ -155,11 +179,62 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const loginWithFace = async (): Promise<boolean> => {
-    // Simulate facial recognition - in real app would verify against stored face
-    await new Promise((resolve) => setTimeout(resolve, 2500));
-    
-    // For demo, try to fetch the demo guard from the API
+  const loginWithFace = async (guardId?: string): Promise<boolean> => {
+    // If guardId provided, use the face-login endpoint
+    if (guardId) {
+      try {
+        const response = await api.post<{ success: boolean; guard: any; site: any }>(
+          '/auth/face-login',
+          { guardId }
+        );
+        
+        if (response.success && response.data?.guard) {
+          const apiGuard = response.data.guard;
+          const isNightShift = apiGuard.shiftType === 'night';
+          const mappedGuard: Guard = {
+            id: apiGuard.id,
+            name: apiGuard.name,
+            email: apiGuard.email,
+            employeeId: apiGuard.employeeId,
+            phone: apiGuard.phone,
+            status: apiGuard.clockedIn ? 'active' : 'off-duty',
+            isActive: true,
+            onboardingStatus: 'active',
+            address: apiGuard.address || undefined,
+            emergencyContact: apiGuard.emergencyContact || undefined,
+            dailyRate: apiGuard.dailyRate || undefined,
+            dateOfJoining: apiGuard.dateOfJoining || undefined,
+            documents: {
+              aadharNumber: apiGuard.aadharNumber || undefined,
+              panNumber: apiGuard.panNumber || undefined,
+              photographUrl: undefined,
+              relievingLetterUrl: undefined,
+            },
+            bankDetails: apiGuard.bankDetails || undefined,
+            currentShift: apiGuard.siteId ? {
+              id: `shift-${Date.now()}`,
+              date: new Date().toISOString().split('T')[0],
+              startTime: apiGuard.shiftStartTime || (isNightShift ? '20:00' : '08:00'),
+              endTime: apiGuard.shiftEndTime || (isNightShift ? '08:00' : '20:00'),
+              location: response.data.site?.name || 'Assigned Site',
+              siteId: apiGuard.siteId,
+              status: 'scheduled',
+              isNightShift: isNightShift,
+            } : undefined,
+            faceDescriptor: apiGuard.faceDescriptor || undefined,
+          };
+          setGuard(mappedGuard);
+          setSite(response.data.site || null);
+          return true;
+        }
+      } catch (e) {
+        console.error('Face login API error:', e);
+        return false;
+      }
+      return false;
+    }
+
+    // Legacy fallback: try to fetch the demo guard from the API
     try {
       const response = await api.post<{ success: boolean; guard: any; site: any }>(
         '/auth/login',
@@ -168,6 +243,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       if (response.success && response.data?.guard) {
         const apiGuard = response.data.guard;
+        const isNightShift = apiGuard.shiftType === 'night';
         const mappedGuard: Guard = {
           id: apiGuard.id,
           name: apiGuard.name,
@@ -177,15 +253,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           status: apiGuard.clockedIn ? 'active' : 'off-duty',
           isActive: true,
           onboardingStatus: 'active',
+          // Personal details from API
+          address: apiGuard.address || undefined,
+          emergencyContact: apiGuard.emergencyContact || undefined,
+          dailyRate: apiGuard.dailyRate || undefined,
+          dateOfJoining: apiGuard.dateOfJoining || undefined,
+          // Documents (masked from API for security)
+          documents: {
+            aadharNumber: apiGuard.aadharNumber || undefined,
+            panNumber: apiGuard.panNumber || undefined,
+            photographUrl: undefined,
+            relievingLetterUrl: undefined,
+          },
+          // Bank details from API
+          bankDetails: apiGuard.bankDetails || undefined,
+          // Current shift based on guard's assigned shift type
           currentShift: apiGuard.siteId ? {
             id: `shift-${Date.now()}`,
             date: new Date().toISOString().split('T')[0],
-            startTime: '08:00',
-            endTime: '20:00',
+            startTime: apiGuard.shiftStartTime || (isNightShift ? '20:00' : '08:00'),
+            endTime: apiGuard.shiftEndTime || (isNightShift ? '08:00' : '20:00'),
             location: response.data.site?.name || 'Assigned Site',
             siteId: apiGuard.siteId,
             status: 'scheduled',
-            isNightShift: false,
+            isNightShift: isNightShift,
           } : undefined,
         };
         setGuard(mappedGuard);
@@ -193,11 +284,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return true;
       }
     } catch (e) {
-      console.warn('API not available, using mock guard');
+      console.warn('API not available - using offline demo fallback');
     }
     
-    // Fallback to mock if API unavailable
-    setGuard(mockGuard);
+    // OFFLINE FALLBACK: Use demo guard when API is not reachable
+    // In production, this should use cached guard data from local storage
+    console.warn('⚠️ OFFLINE MODE: Using demo guard fallback');
+    setGuard(DEMO_FALLBACK_GUARD);
     return true;
   };
 

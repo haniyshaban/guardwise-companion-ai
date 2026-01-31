@@ -3,23 +3,40 @@ import { useNavigate } from 'react-router-dom';
 import { 
   MapPin, Clock, LogIn, LogOut, Shield, ChevronRight, 
   AlertTriangle, CheckCircle, TrendingUp, Bell, Truck,
-  Navigation, CalendarDays, Moon
+  Navigation, CalendarDays, Moon, Send, X, Loader2, Scan,
+  Phone
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Progress } from '@/components/ui/progress';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
+  DialogFooter,
 } from '@/components/ui/dialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { BottomNav } from '@/components/BottomNav';
 import { useToast } from '@/hooks/use-toast';
 import { WakeAlert } from '@/types/guard';
+import { FacialScanner } from '@/components/FacialScanner';
+import { 
+  submitConveyanceRequest, 
+  getConveyanceStatus, 
+  cancelConveyanceRequest,
+  ConveyanceRequest 
+} from '@/services/GuardAPI';
+
+// API Base URL
+const API_BASE_URL = 'http://localhost:4000';
+
+// Location sync interval (30 seconds)
+const LOCATION_SYNC_INTERVAL = 30 * 1000;
 
 // Wake Alert constants
 const WAKE_ALERT_TIMEOUT = 120; // 120 seconds to respond
@@ -36,6 +53,13 @@ export default function Dashboard() {
   const [isTransportMode, setIsTransportMode] = useState(false);
   const [transportStartTime, setTransportStartTime] = useState<Date | null>(null);
   
+  // Conveyance request state
+  const [showConveyanceDialog, setShowConveyanceDialog] = useState(false);
+  const [conveyanceReason, setConveyanceReason] = useState('');
+  const [conveyanceStatus, setConveyanceStatus] = useState<ConveyanceRequest | null>(null);
+  const [isSubmittingConveyance, setIsSubmittingConveyance] = useState(false);
+  const conveyancePollingRef = useRef<NodeJS.Timeout | null>(null);
+  
   // Wake alert state
   const [wakeAlertActive, setWakeAlertActive] = useState(false);
   const [wakeAlertTimer, setWakeAlertTimer] = useState(WAKE_ALERT_TIMEOUT);
@@ -43,6 +67,16 @@ export default function Dashboard() {
   const [wakeAlertLogs, setWakeAlertLogs] = useState<WakeAlert[]>([]);
   const wakeIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const wakeCountdownRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Wake alert face verification state
+  const [showWakeFaceVerify, setShowWakeFaceVerify] = useState(false);
+  const [isWakeFaceVerified, setIsWakeFaceVerified] = useState(false);
+
+  // SOS alert state
+  const [showSOSDialog, setShowSOSDialog] = useState(false);
+  const [sosMessage, setSosMessage] = useState('');
+  const [isSubmittingSOS, setIsSubmittingSOS] = useState(false);
+  const [sosActive, setSosActive] = useState(false);
 
   const currentTime = new Date().toLocaleTimeString('en-US', {
     hour: '2-digit',
@@ -76,6 +110,7 @@ export default function Dashboard() {
     setWakeAlertActive(true);
     setWakeAlertTimer(WAKE_ALERT_TIMEOUT);
     setWakeAlertTriggeredAt(new Date());
+    setIsWakeFaceVerified(false); // Reset face verification for each alert
 
     // Start countdown
     wakeCountdownRef.current = setInterval(() => {
@@ -91,8 +126,36 @@ export default function Dashboard() {
     }, 1000);
   }, [isCheckedIn, isNightShift]);
 
+  // Handle face verification for wake alert
+  const handleWakeFaceVerify = (success: boolean) => {
+    setShowWakeFaceVerify(false);
+    if (success) {
+      setIsWakeFaceVerified(true);
+      toast({
+        title: 'Face Verified',
+        description: 'Now press the "I\'m Awake!" button to confirm.',
+      });
+    } else {
+      toast({
+        title: 'Verification Failed',
+        description: 'Face not recognized. Please try again.',
+        variant: 'destructive',
+      });
+    }
+  };
+
   // Handle wake alert response
   const handleWakeAlertResponse = () => {
+    // Only allow response if face is verified (when guard has face descriptor)
+    if (guard?.faceDescriptor && !isWakeFaceVerified) {
+      toast({
+        title: 'Face Verification Required',
+        description: 'Please verify your face before confirming.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     if (wakeCountdownRef.current) {
       clearInterval(wakeCountdownRef.current);
     }
@@ -164,6 +227,178 @@ export default function Dashboard() {
     }, interval);
   }, [isCheckedIn, isNightShift, triggerWakeAlert]);
 
+  // ============ Conveyance Request Functions ============
+  
+  // Check for active conveyance request on mount and poll for updates
+  useEffect(() => {
+    const checkConveyanceStatus = async () => {
+      if (!guard?.id) return;
+      
+      try {
+        const response = await getConveyanceStatus(guard.id);
+        if (response.success && response.data) {
+          setConveyanceStatus(response.data);
+        }
+      } catch (error) {
+        console.error('Failed to fetch conveyance status:', error);
+      }
+    };
+
+    // Initial check
+    checkConveyanceStatus();
+
+    // Poll every 30 seconds if there's a pending request
+    if (conveyanceStatus?.status === 'pending') {
+      conveyancePollingRef.current = setInterval(checkConveyanceStatus, 30000);
+    }
+
+    return () => {
+      if (conveyancePollingRef.current) {
+        clearInterval(conveyancePollingRef.current);
+      }
+    };
+  }, [guard?.id, conveyanceStatus?.status]);
+
+  // Handle status updates
+  useEffect(() => {
+    if (conveyanceStatus?.status === 'approved') {
+      toast({
+        title: 'Conveyance Approved! ✓',
+        description: 'Your request has been approved. You may leave the geofence.',
+      });
+    } else if (conveyanceStatus?.status === 'denied') {
+      toast({
+        title: 'Conveyance Denied',
+        description: conveyanceStatus.staffNotes || 'Your request was denied.',
+        variant: 'destructive',
+      });
+      // Clear the status after showing denial
+      setTimeout(() => setConveyanceStatus(null), 5000);
+    }
+  }, [conveyanceStatus?.status]);
+
+  const handleSubmitConveyanceRequest = async () => {
+    if (!guard?.id || !conveyanceReason.trim()) return;
+
+    setIsSubmittingConveyance(true);
+    
+    try {
+      const response = await submitConveyanceRequest({
+        guardId: guard.id,
+        siteId: guard.siteId || '',
+        reason: conveyanceReason.trim(),
+        estimatedDuration: 30,
+      });
+
+      if (response.success && response.data) {
+        setConveyanceStatus(response.data);
+        setShowConveyanceDialog(false);
+        setConveyanceReason('');
+        toast({
+          title: 'Request Submitted',
+          description: 'Your conveyance request is pending approval.',
+        });
+      } else {
+        toast({
+          title: 'Request Failed',
+          description: response.error || 'Could not submit request',
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to submit conveyance request',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSubmittingConveyance(false);
+    }
+  };
+
+  const handleCancelConveyanceRequest = async () => {
+    if (!conveyanceStatus?.id) return;
+
+    try {
+      const response = await cancelConveyanceRequest(conveyanceStatus.id);
+      if (response.success) {
+        setConveyanceStatus(null);
+        toast({
+          title: 'Request Cancelled',
+          description: 'Your conveyance request has been cancelled.',
+        });
+      }
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to cancel request',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  // ============ SOS Alert Functions ============
+  const handleSubmitSOS = async () => {
+    if (!guard?.id) return;
+
+    setIsSubmittingSOS(true);
+    
+    try {
+      // Get current location
+      let lat: number | undefined;
+      let lng: number | undefined;
+      
+      if (navigator.geolocation) {
+        try {
+          const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+              enableHighAccuracy: true,
+              timeout: 5000,
+            });
+          });
+          lat = position.coords.latitude;
+          lng = position.coords.longitude;
+        } catch (e) {
+          console.warn('Could not get location for SOS:', e);
+        }
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/sos-alerts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          guardId: guard.id,
+          guardName: guard.name,
+          siteId: guard.siteId || null,
+          siteName: guard.currentShift?.location || null,
+          lat,
+          lng,
+          message: sosMessage.trim() || 'Emergency SOS Alert',
+        }),
+      });
+
+      if (!response.ok) throw new Error('Failed to send SOS');
+
+      setSosActive(true);
+      setShowSOSDialog(false);
+      setSosMessage('');
+      
+      toast({
+        title: '🚨 SOS Alert Sent!',
+        description: 'Help is on the way. Stay safe.',
+      });
+    } catch (error) {
+      console.error('SOS submit error:', error);
+      toast({
+        title: 'SOS Failed',
+        description: 'Could not send alert. Try calling emergency services.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSubmittingSOS(false);
+    }
+  };
+
   // Start wake alert system when checked in during night shift
   useEffect(() => {
     if (isCheckedIn && isNightShift()) {
@@ -182,6 +417,45 @@ export default function Dashboard() {
       }
     };
   }, [isCheckedIn, isNightShift, triggerWakeAlert]);
+
+  // Sync guard location to API when checked in
+  useEffect(() => {
+    if (!isCheckedIn || !guard?.id) return;
+
+    const syncLocation = async () => {
+      if (!navigator.geolocation) return;
+      
+      try {
+        const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 0,
+          });
+        });
+        
+        const { latitude, longitude } = position.coords;
+        
+        await fetch(`${API_BASE_URL}/api/guards/${guard.id}/location`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lat: latitude, lng: longitude }),
+        });
+        
+        console.log('Location synced:', latitude, longitude);
+      } catch (e) {
+        console.warn('Could not sync location:', e);
+      }
+    };
+
+    // Sync immediately on check-in
+    syncLocation();
+
+    // Then sync periodically
+    const intervalId = setInterval(syncLocation, LOCATION_SYNC_INTERVAL);
+
+    return () => clearInterval(intervalId);
+  }, [isCheckedIn, guard?.id]);
 
   // Handle transport mode toggle
   const handleTransportToggle = (enabled: boolean) => {
@@ -216,6 +490,17 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-background pb-20">
+      {/* Wake Alert Face Verification Scanner */}
+      {showWakeFaceVerify && (
+        <FacialScanner
+          mode="verify"
+          storedDescriptor={guard?.faceDescriptor}
+          matchThreshold={0.6}
+          onScanComplete={handleWakeFaceVerify}
+          onCancel={() => setShowWakeFaceVerify(false)}
+        />
+      )}
+
       {/* Wake Alert Dialog */}
       <Dialog open={wakeAlertActive} onOpenChange={() => {}}>
         <DialogContent className="sm:max-w-md" onPointerDownOutside={(e) => e.preventDefault()}>
@@ -225,7 +510,9 @@ export default function Dashboard() {
               Wake-Up Check!
             </DialogTitle>
             <DialogDescription>
-              Press the button below to confirm you're awake and alert.
+              {guard?.faceDescriptor 
+                ? 'Verify your face and press the button below to confirm you\'re awake.'
+                : 'Press the button below to confirm you\'re awake and alert.'}
             </DialogDescription>
           </DialogHeader>
           
@@ -242,16 +529,155 @@ export default function Dashboard() {
               className="h-2"
             />
 
+            {/* Face verification section - only show if guard has face descriptor */}
+            {guard?.faceDescriptor && (
+              <div className="space-y-3">
+                {isWakeFaceVerified ? (
+                  <div className="flex items-center justify-center gap-2 p-3 rounded-lg bg-accent/20 text-accent">
+                    <CheckCircle className="w-5 h-5" />
+                    <span className="font-medium">Face Verified</span>
+                  </div>
+                ) : (
+                  <Button 
+                    variant="outline" 
+                    className="w-full"
+                    onClick={() => setShowWakeFaceVerify(true)}
+                  >
+                    <Scan className="w-5 h-5 mr-2" />
+                    Verify Face First
+                  </Button>
+                )}
+              </div>
+            )}
+
             <Button 
               variant="gradient" 
               size="xl" 
               className="w-full"
               onClick={handleWakeAlertResponse}
+              disabled={guard?.faceDescriptor && !isWakeFaceVerified}
             >
               <CheckCircle className="w-6 h-6 mr-2" />
               I'm Awake!
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Conveyance Request Dialog */}
+      <Dialog open={showConveyanceDialog} onOpenChange={setShowConveyanceDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Send className="w-5 h-5 text-primary" />
+              Request Conveyance
+            </DialogTitle>
+            <DialogDescription>
+              Submit a request to leave your assigned geofence. Your request will be reviewed by a field officer.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="conveyance-reason">Reason for leaving geofence</Label>
+              <Textarea
+                id="conveyance-reason"
+                placeholder="e.g., Need to escort material delivery to storage facility..."
+                value={conveyanceReason}
+                onChange={(e) => setConveyanceReason(e.target.value)}
+                className="bg-secondary/50 min-h-[100px]"
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="flex gap-2 sm:gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowConveyanceDialog(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="gradient"
+              onClick={handleSubmitConveyanceRequest}
+              disabled={isSubmittingConveyance || !conveyanceReason.trim()}
+            >
+              {isSubmittingConveyance ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Submitting...
+                </>
+              ) : (
+                <>
+                  <Send className="w-4 h-4 mr-2" />
+                  Submit Request
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* SOS Alert Dialog */}
+      <Dialog open={showSOSDialog} onOpenChange={setShowSOSDialog}>
+        <DialogContent className="sm:max-w-md border-red-500/50">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-500">
+              <AlertTriangle className="w-6 h-6" />
+              Emergency SOS
+            </DialogTitle>
+            <DialogDescription>
+              Send an emergency alert to the control room. Use only in genuine emergencies.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="p-4 bg-red-500/10 rounded-lg border border-red-500/30">
+              <p className="text-sm text-foreground font-medium mb-2">This will:</p>
+              <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
+                <li>Alert the admin control room immediately</li>
+                <li>Share your current GPS location</li>
+                <li>Mark you as requiring urgent assistance</li>
+              </ul>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="sos-message">Additional Details (optional)</Label>
+              <Textarea
+                id="sos-message"
+                placeholder="e.g., Intruder spotted at gate B, need backup..."
+                value={sosMessage}
+                onChange={(e) => setSosMessage(e.target.value)}
+                className="bg-secondary/50 min-h-[80px]"
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="flex gap-2 sm:gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowSOSDialog(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              className="bg-red-600 hover:bg-red-700"
+              onClick={handleSubmitSOS}
+              disabled={isSubmittingSOS}
+            >
+              {isSubmittingSOS ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Sending...
+                </>
+              ) : (
+                <>
+                  <Phone className="w-4 h-4 mr-2" />
+                  Send SOS Alert
+                </>
+              )}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -327,17 +753,48 @@ export default function Dashboard() {
                 Check In
               </Button>
             ) : (
-              <Button 
-                variant="destructive" 
-                className="flex-1"
-                onClick={() => setIsCheckedIn(false)}
-              >
-                <LogOut className="w-5 h-5 mr-2" />
-                Check Out
-              </Button>
+              <>
+                <Button 
+                  variant="destructive" 
+                  className="flex-1"
+                  onClick={() => setIsCheckedIn(false)}
+                >
+                  <LogOut className="w-5 h-5 mr-2" />
+                  Check Out
+                </Button>
+                <Button 
+                  variant="outline"
+                  className="border-red-500 bg-red-500/10 hover:bg-red-500/20 text-red-500"
+                  onClick={() => setShowSOSDialog(true)}
+                >
+                  <Phone className="w-5 h-5" />
+                </Button>
+              </>
             )}
           </div>
         </div>
+
+        {/* SOS Active Banner */}
+        {sosActive && (
+          <div className="glass-card p-4 mb-6 border-2 border-red-500 bg-red-500/10 animate-pulse">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center">
+                <AlertTriangle className="w-6 h-6 text-red-500" />
+              </div>
+              <div className="flex-1">
+                <p className="font-bold text-red-500">SOS Alert Active</p>
+                <p className="text-sm text-muted-foreground">Help has been notified. Stay calm.</p>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSosActive(false)}
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+          </div>
+        )}
 
         {/* Transport Mode Toggle (only when checked in) */}
         {isCheckedIn && (
@@ -381,6 +838,71 @@ export default function Dashboard() {
                 <p className="text-xs text-muted-foreground">Missed</p>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Conveyance Request Status (when active) */}
+        {conveyanceStatus && conveyanceStatus.status === 'pending' && (
+          <div className="glass-card p-4 mb-6 border border-warning/30">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <div className="status-indicator status-pending animate-pulse" />
+                <span className="text-sm font-medium text-warning">Pending Approval</span>
+              </div>
+              <Badge variant="outline" className="bg-warning/20 text-warning border-warning">
+                <Clock className="w-3 h-3 mr-1" />
+                Waiting
+              </Badge>
+            </div>
+            <p className="text-sm text-foreground mb-3">{conveyanceStatus.reason}</p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full border-destructive/50 text-destructive hover:bg-destructive/10"
+              onClick={handleCancelConveyanceRequest}
+            >
+              <X className="w-4 h-4 mr-2" />
+              Cancel Request
+            </Button>
+          </div>
+        )}
+
+        {/* Conveyance Approved Status */}
+        {conveyanceStatus && conveyanceStatus.status === 'approved' && (
+          <div className="glass-card p-4 mb-6 border border-accent/30">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <CheckCircle className="w-5 h-5 text-accent" />
+                <span className="text-sm font-medium text-accent">Conveyance Approved</span>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setConveyanceStatus(null)}
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              You may leave the geofence. {conveyanceStatus.staffNotes && `Note: ${conveyanceStatus.staffNotes}`}
+            </p>
+          </div>
+        )}
+
+        {/* Request Conveyance Button (only when checked in and no pending request) */}
+        {isCheckedIn && (!conveyanceStatus || conveyanceStatus.status !== 'pending') && (
+          <div className="glass-card p-4 mb-6">
+            <Button
+              variant="outline"
+              className="w-full border-primary/50 text-primary hover:bg-primary/10"
+              onClick={() => setShowConveyanceDialog(true)}
+            >
+              <Send className="w-5 h-5 mr-2" />
+              Request Conveyance
+            </Button>
+            <p className="text-xs text-muted-foreground text-center mt-2">
+              Request permission to leave your assigned area
+            </p>
           </div>
         )}
 

@@ -16,6 +16,7 @@ export interface Guard {
   dateOfJoining?: string;
   address?: string;
   emergencyContact?: string;
+  faceDescriptor?: string; // JSON string of Float32Array for face recognition
 }
 
 export interface Shift {

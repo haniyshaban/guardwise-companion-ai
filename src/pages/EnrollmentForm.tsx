@@ -1,8 +1,8 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
-  ArrowLeft, Upload, CheckCircle, AlertCircle, Loader2, 
-  User, CreditCard, Building, Phone, Mail, MapPin, Shield
+  ArrowLeft, Upload, CheckCircle, Loader2, 
+  User, CreditCard, Building, Phone, Mail, MapPin, Camera, Scan
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,14 +10,12 @@ import { useToast } from '@/hooks/use-toast';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
-import { AadharService, maskAadharNumber } from '@/services/AadharService';
-import {
-  InputOTP,
-  InputOTPGroup,
-  InputOTPSlot,
-} from "@/components/ui/input-otp";
+import { useAuth } from '@/contexts/AuthContext';
+import api from '@/services/api';
+import { FacialScanner } from '@/components/FacialScanner';
+import { descriptorToString } from '@/services/FaceApiService';
 
-type EnrollmentStep = 'personal' | 'documents' | 'verification' | 'success';
+type EnrollmentStep = 'personal' | 'face' | 'documents' | 'success';
 
 interface FormData {
   fullName: string;
@@ -43,19 +41,12 @@ interface FileUploads {
 export default function EnrollmentForm() {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { guard, updateGuard } = useAuth();
 
   const [step, setStep] = useState<EnrollmentStep>('personal');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  
-  // OTP Verification State
-  const [otpSent, setOtpSent] = useState(false);
-  const [otp, setOtp] = useState('');
-  const [transactionId, setTransactionId] = useState('');
-  const [isVerifying, setIsVerifying] = useState(false);
-  const [isAadharVerified, setIsAadharVerified] = useState(false);
-  const [maskedPhone, setMaskedPhone] = useState('');
 
-  // Form data
+  // Form data - prepopulated from guard data if available
   const [formData, setFormData] = useState<FormData>({
     fullName: '',
     email: '',
@@ -70,6 +61,26 @@ export default function EnrollmentForm() {
     accountHolderName: '',
   });
 
+  // Prepopulate form with existing guard data
+  useEffect(() => {
+    if (guard) {
+      setFormData(prev => ({
+        ...prev,
+        fullName: guard.name || prev.fullName,
+        email: guard.email || prev.email,
+        phone: guard.phone || prev.phone,
+        address: guard.address || prev.address,
+        emergencyContact: guard.emergencyContact || prev.emergencyContact,
+        aadharNumber: guard.documents?.aadharNumber || prev.aadharNumber,
+        panNumber: guard.documents?.panNumber || prev.panNumber,
+        bankAccountNumber: guard.bankDetails?.accountNumber || prev.bankAccountNumber,
+        bankIfsc: guard.bankDetails?.ifsc || prev.bankIfsc,
+        bankName: guard.bankDetails?.bankName || prev.bankName,
+        accountHolderName: guard.bankDetails?.accountHolderName || prev.accountHolderName,
+      }));
+    }
+  }, [guard]);
+
   // File uploads
   const [files, setFiles] = useState<FileUploads>({
     photograph: null,
@@ -82,6 +93,11 @@ export default function EnrollmentForm() {
   const aadharDocRef = useRef<HTMLInputElement>(null);
   const panDocRef = useRef<HTMLInputElement>(null);
   const relievingLetterRef = useRef<HTMLInputElement>(null);
+
+  // Face capture state
+  const [showFaceCapture, setShowFaceCapture] = useState(false);
+  const [faceDescriptor, setFaceDescriptor] = useState<string | null>(null);
+  const [isFaceCaptured, setIsFaceCaptured] = useState(false);
 
   const updateFormData = (field: keyof FormData, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -103,118 +119,6 @@ export default function EnrollmentForm() {
     return panRegex.test(pan.toUpperCase());
   };
 
-  // Request Aadhar OTP
-  const handleRequestOTP = async () => {
-    if (!validateAadhar(formData.aadharNumber)) {
-      toast({
-        title: 'Invalid Aadhar',
-        description: 'Please enter a valid 12-digit Aadhar number',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    setIsVerifying(true);
-    try {
-      const result = await AadharService.requestOTP({
-        aadharNumber: formData.aadharNumber,
-        name: formData.fullName,
-      });
-
-      if (result.success) {
-        setOtpSent(true);
-        setTransactionId(result.transactionId);
-        setMaskedPhone(result.maskedPhone || '');
-        toast({
-          title: 'OTP Sent',
-          description: `OTP sent to ${result.maskedPhone}. Check console for mock OTP.`,
-        });
-      } else {
-        toast({
-          title: 'Failed to send OTP',
-          description: result.message,
-          variant: 'destructive',
-        });
-      }
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: 'Failed to request OTP. Please try again.',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsVerifying(false);
-    }
-  };
-
-  // Verify OTP
-  const handleVerifyOTP = async () => {
-    if (otp.length !== 6) {
-      toast({
-        title: 'Invalid OTP',
-        description: 'Please enter a 6-digit OTP',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    setIsVerifying(true);
-    try {
-      const result = await AadharService.verifyOTP({
-        transactionId,
-        otp,
-        aadharNumber: formData.aadharNumber,
-      });
-
-      if (result.success && result.verified) {
-        setIsAadharVerified(true);
-        toast({
-          title: 'Verification Successful',
-          description: 'Your Aadhar has been verified successfully!',
-        });
-      } else {
-        toast({
-          title: 'Verification Failed',
-          description: result.message,
-          variant: 'destructive',
-        });
-      }
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: 'Verification failed. Please try again.',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsVerifying(false);
-    }
-  };
-
-  // Resend OTP
-  const handleResendOTP = async () => {
-    setIsVerifying(true);
-    try {
-      const result = await AadharService.resendOTP(transactionId);
-      if (result.success) {
-        toast({
-          title: 'OTP Resent',
-          description: 'A new OTP has been sent. Check console for mock OTP.',
-        });
-      } else {
-        // Session expired, request new OTP
-        await handleRequestOTP();
-      }
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: 'Failed to resend OTP',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsVerifying(false);
-    }
-  };
-
   // Validate current step
   const validateStep = (currentStep: EnrollmentStep): boolean => {
     switch (currentStep) {
@@ -223,6 +127,17 @@ export default function EnrollmentForm() {
           toast({
             title: 'Missing Information',
             description: 'Please fill in all required fields',
+            variant: 'destructive',
+          });
+          return false;
+        }
+        return true;
+
+      case 'face':
+        if (!isFaceCaptured || !faceDescriptor) {
+          toast({
+            title: 'Face Capture Required',
+            description: 'Please capture your face for recognition',
             variant: 'destructive',
           });
           return false;
@@ -256,17 +171,6 @@ export default function EnrollmentForm() {
         }
         return true;
 
-      case 'verification':
-        if (!isAadharVerified) {
-          toast({
-            title: 'Verification Required',
-            description: 'Please verify your Aadhar number before proceeding',
-            variant: 'destructive',
-          });
-          return false;
-        }
-        return true;
-
       default:
         return true;
     }
@@ -275,23 +179,66 @@ export default function EnrollmentForm() {
   // Navigate to next step
   const handleNextStep = () => {
     if (validateStep(step)) {
-      if (step === 'personal') setStep('documents');
-      else if (step === 'documents') setStep('verification');
+      if (step === 'personal') setStep('face');
+      else if (step === 'face') setStep('documents');
     }
   };
 
   // Navigate to previous step
   const handlePreviousStep = () => {
-    if (step === 'documents') setStep('personal');
-    else if (step === 'verification') setStep('documents');
+    if (step === 'face') setStep('personal');
+    else if (step === 'documents') setStep('face');
+  };
+
+  // Upload a single file and return the URL
+  const uploadFile = async (file: File, fieldName: string): Promise<string | null> => {
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      const response = await fetch('http://localhost:4000/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+      
+      if (!response.ok) {
+        throw new Error('Upload failed');
+      }
+      
+      const result = await response.json();
+      return result.url;
+    } catch (error) {
+      console.error(`Failed to upload ${fieldName}:`, error);
+      return null;
+    }
+  };
+
+  // Handle face capture complete
+  const handleFaceCaptureComplete = (success: boolean, descriptor?: Float32Array) => {
+    setShowFaceCapture(false);
+    if (success && descriptor) {
+      const descriptorStr = descriptorToString(descriptor);
+      setFaceDescriptor(descriptorStr);
+      setIsFaceCaptured(true);
+      toast({
+        title: 'Face Captured',
+        description: 'Your face has been enrolled for recognition.',
+      });
+    } else {
+      toast({
+        title: 'Capture Failed',
+        description: 'Failed to capture face. Please try again.',
+        variant: 'destructive',
+      });
+    }
   };
 
   // Final submission
   const handleSubmit = async () => {
-    if (!isAadharVerified) {
+    if (!faceDescriptor) {
       toast({
-        title: 'Verification Required',
-        description: 'Please verify your Aadhar before submitting',
+        title: 'Face Capture Required',
+        description: 'Please capture your face before submitting',
         variant: 'destructive',
       });
       return;
@@ -299,21 +246,107 @@ export default function EnrollmentForm() {
 
     setIsSubmitting(true);
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      // Upload files first
+      let photographUrl = null;
+      let aadharDocUrl = null;
+      let panDocUrl = null;
+      let relievingLetterUrl = null;
+
+      if (files.photograph) {
+        photographUrl = await uploadFile(files.photograph, 'photograph');
+      }
+      if (files.aadharDoc) {
+        aadharDocUrl = await uploadFile(files.aadharDoc, 'aadharDoc');
+      }
+      if (files.panDoc) {
+        panDocUrl = await uploadFile(files.panDoc, 'panDoc');
+      }
+      if (files.relievingLetter) {
+        relievingLetterUrl = await uploadFile(files.relievingLetter, 'relievingLetter');
+      }
+
+      if (guard?.id) {
+        // Existing guard - Update profile
+        const response = await api.put(`/guards/${guard.id}/profile`, {
+          address: formData.address,
+          emergencyContact: formData.emergencyContact,
+          aadharNumber: formData.aadharNumber.replace(/\D/g, ''), // Remove formatting
+          panNumber: formData.panNumber.toUpperCase(),
+          bankAccountNumber: formData.bankAccountNumber,
+          bankIfsc: formData.bankIfsc.toUpperCase(),
+          bankName: formData.bankName,
+          accountHolderName: formData.accountHolderName,
+          faceDescriptor: faceDescriptor,
+          photographUrl,
+          aadharDocUrl,
+          panDocUrl,
+          relievingLetterUrl,
+        });
+
+        if (response.success) {
+          // Update local guard state with new data
+          updateGuard({
+            address: formData.address,
+            emergencyContact: formData.emergencyContact,
+            documents: {
+              ...guard.documents,
+              aadharNumber: formData.aadharNumber,
+              panNumber: formData.panNumber,
+            },
+            bankDetails: {
+              accountNumber: formData.bankAccountNumber,
+              ifsc: formData.bankIfsc,
+              bankName: formData.bankName,
+              accountHolderName: formData.accountHolderName,
+            },
+          });
+          toast({
+            title: 'Profile Updated',
+            description: 'Your details have been saved successfully.',
+          });
+        } else {
+          throw new Error(response.error || 'Failed to update profile');
+        }
+      } else {
+        // New guard - Create enrollment
+        const response = await api.post('/guards/enroll', {
+          fullName: formData.fullName,
+          email: formData.email,
+          phone: formData.phone,
+          address: formData.address,
+          emergencyContact: formData.emergencyContact,
+          aadharNumber: formData.aadharNumber.replace(/\D/g, ''),
+          panNumber: formData.panNumber.toUpperCase(),
+          bankAccountNumber: formData.bankAccountNumber,
+          bankIfsc: formData.bankIfsc.toUpperCase(),
+          bankName: formData.bankName,
+          accountHolderName: formData.accountHolderName,
+          faceDescriptor: faceDescriptor,
+          photographUrl,
+          aadharDocUrl,
+          panDocUrl,
+          relievingLetterUrl,
+        });
+
+        if (response.success) {
+          toast({
+            title: 'Enrollment Submitted',
+            description: 'Your enrollment has been submitted. You will be notified once approved.',
+          });
+        } else {
+          throw new Error(response.error || 'Failed to submit enrollment');
+        }
+      }
 
       console.log('Enrollment Data:', formData);
       console.log('Files:', files);
 
       setStep('success');
-      toast({
-        title: 'Enrollment Submitted',
-        description: 'Your enrollment is under review.',
-      });
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Please try again.';
       toast({
         title: 'Submission Failed',
-        description: 'Please try again.',
+        description: errorMessage,
         variant: 'destructive',
       });
     } finally {
@@ -371,17 +404,28 @@ export default function EnrollmentForm() {
         <h1 className="text-2xl font-bold text-foreground">Guard Enrollment</h1>
         <p className="text-sm text-muted-foreground mt-1">
           {step === 'personal' && 'Step 1: Personal Information'}
-          {step === 'documents' && 'Step 2: Documents & Bank Details'}
-          {step === 'verification' && 'Step 3: Aadhar Verification'}
+          {step === 'face' && 'Step 2: Face Enrollment'}
+          {step === 'documents' && 'Step 3: Documents & Bank Details'}
+          {step === 'verification' && 'Step 4: Aadhar Verification'}
         </p>
 
         {/* Progress Bar */}
         <div className="flex gap-2 mt-4">
-          <div className={`h-1 flex-1 rounded-full ${step === 'personal' || step === 'documents' || step === 'verification' ? 'gradient-primary' : 'bg-secondary'}`} />
-          <div className={`h-1 flex-1 rounded-full ${step === 'documents' || step === 'verification' ? 'gradient-primary' : 'bg-secondary'}`} />
+          <div className={`h-1 flex-1 rounded-full ${['personal', 'face', 'documents', 'verification'].includes(step) ? 'gradient-primary' : 'bg-secondary'}`} />
+          <div className={`h-1 flex-1 rounded-full ${['face', 'documents', 'verification'].includes(step) ? 'gradient-primary' : 'bg-secondary'}`} />
+          <div className={`h-1 flex-1 rounded-full ${['documents', 'verification'].includes(step) ? 'gradient-primary' : 'bg-secondary'}`} />
           <div className={`h-1 flex-1 rounded-full ${step === 'verification' ? 'gradient-primary' : 'bg-secondary'}`} />
         </div>
       </div>
+
+      {/* Face Capture Modal */}
+      {showFaceCapture && (
+        <FacialScanner
+          mode="capture"
+          onScanComplete={handleFaceCaptureComplete}
+          onCancel={() => setShowFaceCapture(false)}
+        />
+      )}
 
       <div className="px-6">
         {/* Step 1: Personal Information */}
@@ -500,12 +544,90 @@ export default function EnrollmentForm() {
             </Card>
 
             <Button variant="gradient" className="w-full" onClick={handleNextStep}>
-              Continue to Documents
+              Continue to Face Enrollment
             </Button>
           </div>
         )}
 
-        {/* Step 2: Documents & Bank Details */}
+        {/* Step 2: Face Enrollment */}
+        {step === 'face' && (
+          <div className="space-y-6">
+            <Card className="glass-card border-0">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Scan className="w-5 h-5 text-primary" />
+                  Face Recognition Enrollment
+                </CardTitle>
+                <CardDescription>
+                  Capture your face for secure login and identity verification
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {!isFaceCaptured ? (
+                  <div className="text-center py-8">
+                    <div className="w-24 h-24 rounded-full bg-secondary/50 flex items-center justify-center mx-auto mb-6">
+                      <Camera className="w-12 h-12 text-muted-foreground" />
+                    </div>
+                    <h3 className="text-lg font-semibold text-foreground mb-2">
+                      Face Not Enrolled
+                    </h3>
+                    <p className="text-sm text-muted-foreground mb-6 max-w-sm mx-auto">
+                      Your face will be used for quick login and identity verification during shifts. 
+                      Ensure good lighting and face the camera directly.
+                    </p>
+                    <Button 
+                      variant="gradient" 
+                      size="lg"
+                      onClick={() => setShowFaceCapture(true)}
+                    >
+                      <Camera className="w-5 h-5 mr-2" />
+                      Capture Face
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <div className="w-24 h-24 rounded-full bg-accent/20 flex items-center justify-center mx-auto mb-6">
+                      <CheckCircle className="w-12 h-12 text-accent" />
+                    </div>
+                    <h3 className="text-lg font-semibold text-foreground mb-2">
+                      Face Enrolled Successfully
+                    </h3>
+                    <p className="text-sm text-muted-foreground mb-6">
+                      Your face has been captured for recognition. You can now use facial login.
+                    </p>
+                    <Button 
+                      variant="outline"
+                      onClick={() => {
+                        setIsFaceCaptured(false);
+                        setFaceDescriptor(null);
+                        setShowFaceCapture(true);
+                      }}
+                    >
+                      <Camera className="w-4 h-4 mr-2" />
+                      Recapture Face
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <div className="flex gap-3">
+              <Button variant="outline" className="flex-1" onClick={handlePreviousStep}>
+                Back
+              </Button>
+              <Button 
+                variant="gradient" 
+                className="flex-1" 
+                onClick={handleNextStep}
+                disabled={!isFaceCaptured}
+              >
+                Continue to Documents
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Step 3: Documents & Bank Details */}
         {step === 'documents' && (
           <div className="space-y-6">
             {/* Identity Documents */}
@@ -527,12 +649,6 @@ export default function EnrollmentForm() {
                     placeholder="1234 5678 9012"
                     maxLength={14}
                   />
-                  {isAadharVerified && (
-                    <p className="text-sm text-accent flex items-center gap-1">
-                      <CheckCircle className="w-4 h-4" />
-                      Aadhar Verified
-                    </p>
-                  )}
                 </div>
 
                 <div className="space-y-2">
@@ -685,159 +801,51 @@ export default function EnrollmentForm() {
               </CardContent>
             </Card>
 
-            <div className="flex gap-3">
-              <Button variant="outline" className="flex-1" onClick={handlePreviousStep}>
-                Back
-              </Button>
-              <Button variant="gradient" className="flex-1" onClick={handleNextStep}>
-                Continue to Verification
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* Step 3: Aadhar Verification */}
-        {step === 'verification' && (
-          <div className="space-y-6">
+            {/* Enrollment Summary */}
             <Card className="glass-card border-0">
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Shield className="w-5 h-5 text-primary" />
-                  Aadhar Verification
-                </CardTitle>
-                <CardDescription>
-                  Verify your identity using Aadhar OTP
-                </CardDescription>
+                <CardTitle>Enrollment Summary</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-6">
-                {!isAadharVerified ? (
-                  <>
-                    <div className="glass-card p-4 bg-secondary/30">
-                      <p className="text-sm text-muted-foreground">Aadhar Number</p>
-                      <p className="text-lg font-mono font-medium text-foreground">
-                        {maskAadharNumber(formData.aadharNumber)}
-                      </p>
-                    </div>
-
-                    {!otpSent ? (
-                      <Button
-                        variant="gradient"
-                        className="w-full"
-                        onClick={handleRequestOTP}
-                        disabled={isVerifying}
-                      >
-                        {isVerifying ? (
-                          <>
-                            <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                            Sending OTP...
-                          </>
-                        ) : (
-                          'Request OTP'
-                        )}
-                      </Button>
-                    ) : (
-                      <div className="space-y-4">
-                        <p className="text-sm text-muted-foreground text-center">
-                          OTP sent to {maskedPhone}
-                        </p>
-
-                        <div className="flex justify-center">
-                          <InputOTP
-                            maxLength={6}
-                            value={otp}
-                            onChange={(value) => setOtp(value)}
-                          >
-                            <InputOTPGroup>
-                              <InputOTPSlot index={0} />
-                              <InputOTPSlot index={1} />
-                              <InputOTPSlot index={2} />
-                              <InputOTPSlot index={3} />
-                              <InputOTPSlot index={4} />
-                              <InputOTPSlot index={5} />
-                            </InputOTPGroup>
-                          </InputOTP>
-                        </div>
-
-                        <Button
-                          variant="gradient"
-                          className="w-full"
-                          onClick={handleVerifyOTP}
-                          disabled={isVerifying || otp.length !== 6}
-                        >
-                          {isVerifying ? (
-                            <>
-                              <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                              Verifying...
-                            </>
-                          ) : (
-                            'Verify OTP'
-                          )}
-                        </Button>
-
-                        <Button
-                          variant="ghost"
-                          className="w-full"
-                          onClick={handleResendOTP}
-                          disabled={isVerifying}
-                        >
-                          Resend OTP
-                        </Button>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="text-center py-6">
-                    <div className="w-16 h-16 rounded-full bg-accent/20 flex items-center justify-center mx-auto mb-4">
-                      <CheckCircle className="w-8 h-8 text-accent" />
-                    </div>
-                    <h3 className="text-lg font-semibold text-foreground mb-2">
-                      Aadhar Verified Successfully
-                    </h3>
-                    <p className="text-sm text-muted-foreground">
-                      Your identity has been verified. You can now submit your enrollment.
-                    </p>
-                  </div>
-                )}
+              <CardContent className="space-y-3">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Name</span>
+                  <span className="font-medium">{formData.fullName}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Email</span>
+                  <span className="font-medium">{formData.email}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Phone</span>
+                  <span className="font-medium">{formData.phone}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Face</span>
+                  <span className="font-medium text-accent flex items-center gap-1">
+                    <CheckCircle className="w-4 h-4" />
+                    Enrolled
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Aadhar</span>
+                  <span className="font-medium">{formData.aadharNumber ? '••••••••' + formData.aadharNumber.slice(-4) : 'Not provided'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">PAN</span>
+                  <span className="font-medium">{formData.panNumber || 'Not provided'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Bank</span>
+                  <span className="font-medium">{formData.bankName || 'Not provided'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Documents</span>
+                  <span className="font-medium">
+                    {[files.photograph, files.aadharDoc, files.panDoc, files.relievingLetter].filter(Boolean).length} uploaded
+                  </span>
+                </div>
               </CardContent>
             </Card>
-
-            {/* Summary */}
-            {isAadharVerified && (
-              <Card className="glass-card border-0">
-                <CardHeader>
-                  <CardTitle>Enrollment Summary</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Name</span>
-                    <span className="font-medium">{formData.fullName}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Email</span>
-                    <span className="font-medium">{formData.email}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Phone</span>
-                    <span className="font-medium">{formData.phone}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Aadhar</span>
-                    <span className="font-medium text-accent flex items-center gap-1">
-                      <CheckCircle className="w-4 h-4" />
-                      Verified
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">PAN</span>
-                    <span className="font-medium">{formData.panNumber}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Bank</span>
-                    <span className="font-medium">{formData.bankName}</span>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
 
             <div className="flex gap-3">
               <Button variant="outline" className="flex-1" onClick={handlePreviousStep}>
@@ -847,7 +855,7 @@ export default function EnrollmentForm() {
                 variant="gradient"
                 className="flex-1"
                 onClick={handleSubmit}
-                disabled={!isAadharVerified || isSubmitting}
+                disabled={isSubmitting}
               >
                 {isSubmitting ? (
                   <>

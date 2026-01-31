@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, Calendar, ChevronLeft, ChevronRight, 
-  Clock, MapPin, CheckCircle 
+  Clock, MapPin, CheckCircle, Sun, Moon, Loader2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { BottomNav } from '@/components/BottomNav';
+import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 
 interface ScheduledShift {
@@ -15,20 +16,109 @@ interface ScheduledShift {
   endTime: string;
   location: string;
   status: 'upcoming' | 'completed' | 'today';
+  isNightShift: boolean;
 }
 
-const mockShifts: ScheduledShift[] = [
-  { id: '1', date: '2024-01-07', startTime: '08:00', endTime: '16:00', location: 'Tech Park - Building A', status: 'today' },
-  { id: '2', date: '2024-01-08', startTime: '16:00', endTime: '00:00', location: 'City Mall - Main Entrance', status: 'upcoming' },
-  { id: '3', date: '2024-01-09', startTime: '08:00', endTime: '16:00', location: 'Tech Park - Building A', status: 'upcoming' },
-  { id: '4', date: '2024-01-10', startTime: '00:00', endTime: '08:00', location: 'Industrial Zone - Gate 3', status: 'upcoming' },
-  { id: '5', date: '2024-01-06', startTime: '08:00', endTime: '16:00', location: 'Tech Park - Building A', status: 'completed' },
-  { id: '6', date: '2024-01-05', startTime: '16:00', endTime: '00:00', location: 'City Mall - Main Entrance', status: 'completed' },
-];
+const API_BASE = 'http://localhost:4000/api';
 
 export default function Schedule() {
   const navigate = useNavigate();
+  const { guard } = useAuth();
   const [selectedDate, setSelectedDate] = useState(new Date());
+  const [apiSchedules, setApiSchedules] = useState<ScheduledShift[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Fetch schedules from API
+  useEffect(() => {
+    if (!guard?.id) return;
+
+    const fetchSchedules = async () => {
+      try {
+        // Get schedules for the past week and next 2 weeks
+        const today = new Date();
+        const from = new Date(today);
+        from.setDate(today.getDate() - 7);
+        const to = new Date(today);
+        to.setDate(today.getDate() + 14);
+
+        const res = await fetch(
+          `${API_BASE}/schedules/${guard.id}?from=${from.toISOString().slice(0,10)}&to=${to.toISOString().slice(0,10)}`
+        );
+        
+        if (res.ok) {
+          const data = await res.json();
+          const todayStr = today.toISOString().slice(0, 10);
+          
+          setApiSchedules(data.map((s: any) => {
+            let status: 'upcoming' | 'completed' | 'today' = 'upcoming';
+            if (s.date < todayStr) status = 'completed';
+            else if (s.date === todayStr) status = 'today';
+            
+            return {
+              id: s.id,
+              date: s.date,
+              startTime: s.startTime,
+              endTime: s.endTime,
+              location: s.siteName || 'Assigned Site',
+              status,
+              isNightShift: s.isNightShift,
+            };
+          }));
+        }
+      } catch (err) {
+        console.error('Failed to fetch schedules:', err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchSchedules();
+  }, [guard?.id]);
+
+  // Use API schedules if available, otherwise generate from guard's assigned shift
+  const generatedShifts = useMemo(() => {
+    // If we have API schedules, use them
+    if (apiSchedules.length > 0) {
+      return apiSchedules;
+    }
+
+    // Otherwise generate from guard's current shift assignment
+    if (!guard?.currentShift) return [];
+    
+    const shifts: ScheduledShift[] = [];
+    const today = new Date();
+    const isNightShift = guard.currentShift.isNightShift;
+    const location = guard.currentShift.location || 'Assigned Site';
+    const startTime = guard.currentShift.startTime || (isNightShift ? '20:00' : '08:00');
+    const endTime = guard.currentShift.endTime || (isNightShift ? '08:00' : '20:00');
+    
+    // Generate shifts for the past week and next 2 weeks
+    for (let i = -7; i < 14; i++) {
+      const shiftDate = new Date(today);
+      shiftDate.setDate(today.getDate() + i);
+      const dateStr = shiftDate.toISOString().split('T')[0];
+      
+      // Skip some days to simulate realistic schedule (work 5 days, off 2)
+      const dayOfWeek = shiftDate.getDay();
+      if (dayOfWeek === 0) continue; // Skip Sundays
+      
+      let status: 'upcoming' | 'completed' | 'today' = 'upcoming';
+      if (i < 0) status = 'completed';
+      else if (i === 0) status = 'today';
+      
+      shifts.push({
+        id: `shift-${dateStr}`,
+        date: dateStr,
+        startTime,
+        endTime,
+        location,
+        status,
+        isNightShift,
+      });
+    }
+    
+    return shifts;
+  }, [guard, apiSchedules]);
 
   const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -54,13 +144,18 @@ export default function Schedule() {
     return formatDate(date) === formatDate(today);
   };
 
-  const shiftsForDate = mockShifts.filter(
+  const shiftsForDate = generatedShifts.filter(
     shift => shift.date === formatDate(selectedDate)
   );
 
-  const upcomingShifts = mockShifts
+  const upcomingShifts = generatedShifts
     .filter(shift => shift.status === 'upcoming')
     .slice(0, 3);
+
+  // Get shift type display info
+  const shiftTypeInfo = guard?.currentShift?.isNightShift 
+    ? { icon: Moon, label: 'Night Shift', color: 'text-purple-400' }
+    : { icon: Sun, label: 'Day Shift', color: 'text-yellow-400' };
 
   return (
     <div className="min-h-screen bg-background pb-20">
@@ -77,9 +172,39 @@ export default function Schedule() {
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-bold text-foreground">My Schedule</h1>
           <div className="flex items-center gap-2">
-            <Calendar className="w-5 h-5 text-primary" />
+            {guard?.currentShift && (
+              <div className={cn("flex items-center gap-1 text-sm", shiftTypeInfo.color)}>
+                <shiftTypeInfo.icon className="w-4 h-4" />
+                <span>{shiftTypeInfo.label}</span>
+              </div>
+            )}
           </div>
         </div>
+
+        {/* Shift Assignment Card */}
+        {guard?.currentShift && (
+          <div className="glass-card p-4 mb-6 border-l-4 border-primary">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm text-muted-foreground">Assigned Shift</span>
+              <span className={cn("flex items-center gap-1 text-sm font-medium", shiftTypeInfo.color)}>
+                <shiftTypeInfo.icon className="w-4 h-4" />
+                {shiftTypeInfo.label}
+              </span>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-primary" />
+                <span className="font-mono font-semibold text-foreground">
+                  {guard.currentShift.startTime} - {guard.currentShift.endTime}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <MapPin className="w-4 h-4" />
+                <span className="text-sm">{guard.currentShift.location}</span>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Week View */}
         <div className="glass-card p-4 mb-6">
@@ -98,7 +223,7 @@ export default function Schedule() {
           <div className="grid grid-cols-7 gap-2">
             {weekDates.map((date, index) => {
               const isSelected = formatDate(date) === formatDate(selectedDate);
-              const hasShift = mockShifts.some(s => s.date === formatDate(date));
+              const hasShift = generatedShifts.some(s => s.date === formatDate(date));
 
               return (
                 <button

@@ -226,6 +226,62 @@ export const getPayrollHistory = async (
   return api.get(`/payroll/${guardId}/history`);
 };
 
+// ============ Conveyance Requests ============
+
+export interface ConveyanceRequest {
+  id: string;
+  guardId: string;
+  guardName: string;
+  siteId: string;
+  siteName: string;
+  reason: string;
+  requestedAt: string;
+  status: 'pending' | 'approved' | 'denied';
+  respondedAt?: string;
+  respondedBy?: string;
+  staffNotes?: string;
+  estimatedDuration?: number;
+  currentLocation?: {
+    lat: number;
+    lng: number;
+  };
+}
+
+export interface ConveyanceRequestPayload {
+  guardId: string;
+  siteId: string;
+  reason: string;
+  estimatedDuration?: number;
+  currentLocation?: {
+    lat: number;
+    lng: number;
+  };
+}
+
+export const submitConveyanceRequest = async (
+  payload: ConveyanceRequestPayload
+): Promise<ApiResponse<ConveyanceRequest>> => {
+  return api.post('/conveyance/request', payload);
+};
+
+export const getConveyanceStatus = async (
+  guardId: string
+): Promise<ApiResponse<ConveyanceRequest | null>> => {
+  return api.get(`/conveyance/status/${guardId}`);
+};
+
+export const cancelConveyanceRequest = async (
+  requestId: string
+): Promise<ApiResponse<{ success: boolean }>> => {
+  return api.delete(`/conveyance/${requestId}`);
+};
+
+export const getConveyanceHistory = async (
+  guardId: string
+): Promise<ApiResponse<ConveyanceRequest[]>> => {
+  return api.get(`/conveyance/history/${guardId}`);
+};
+
 // Export as namespace
 export const GuardAPI = {
   submitEnrollment,
@@ -247,6 +303,10 @@ export const GuardAPI = {
   updateTransportLocation,
   getPayrollRecord,
   getPayrollHistory,
+  submitConveyanceRequest,
+  getConveyanceStatus,
+  cancelConveyanceRequest,
+  getConveyanceHistory,
 };
 
 export default GuardAPI;

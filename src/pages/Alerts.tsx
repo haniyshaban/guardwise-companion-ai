@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Bell, AlertTriangle, Info, CheckCircle, Clock } from 'lucide-react';
+import { ArrowLeft, Bell, AlertTriangle, Info, CheckCircle, Clock, Loader2 } from 'lucide-react';
 import { BottomNav } from '@/components/BottomNav';
+import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 
 interface Alert {
@@ -13,45 +14,81 @@ interface Alert {
   read: boolean;
 }
 
-const mockAlerts: Alert[] = [
-  {
-    id: '1',
-    type: 'warning',
-    title: 'Shift Reminder',
-    message: 'Your shift at Tech Park - Building A starts in 30 minutes.',
-    timestamp: '10 min ago',
-    read: false,
-  },
-  {
-    id: '2',
-    type: 'info',
-    title: 'Schedule Update',
-    message: 'Your shift on Jan 10 has been moved to 16:00 - 00:00.',
-    timestamp: '2 hours ago',
-    read: false,
-  },
-  {
-    id: '3',
-    type: 'success',
-    title: 'Check-in Confirmed',
-    message: 'Successfully checked in at Tech Park - Building A.',
-    timestamp: 'Yesterday',
-    read: true,
-  },
-  {
-    id: '4',
-    type: 'info',
-    title: 'New Assignment',
-    message: 'You have been assigned to City Mall patrol duty.',
-    timestamp: '2 days ago',
-    read: true,
-  },
-];
+const API_BASE = 'http://localhost:4000/api';
 
 export default function Alerts() {
   const navigate = useNavigate();
+  const { guard } = useAuth();
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const unreadCount = mockAlerts.filter(a => !a.read).length;
+  useEffect(() => {
+    if (!guard?.id) return;
+    
+    const fetchNotifications = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/notifications/${guard.id}`);
+        if (res.ok) {
+          const data = await res.json();
+          setAlerts(data.map((n: any) => ({
+            id: n.id,
+            type: n.type as 'warning' | 'info' | 'success',
+            title: n.title,
+            message: n.message,
+            timestamp: formatTimestamp(n.timestamp),
+            read: n.read,
+          })));
+        }
+      } catch (err) {
+        console.error('Failed to fetch notifications:', err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchNotifications();
+    // Poll for new notifications every 30 seconds
+    const interval = setInterval(fetchNotifications, 30000);
+    return () => clearInterval(interval);
+  }, [guard?.id]);
+
+  const formatTimestamp = (iso: string) => {
+    const date = new Date(iso);
+    const now = new Date();
+    const diff = now.getTime() - date.getTime();
+    const minutes = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+
+    if (minutes < 1) return 'Just now';
+    if (minutes < 60) return `${minutes} min ago`;
+    if (hours < 24) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+    if (days === 1) return 'Yesterday';
+    return `${days} days ago`;
+  };
+
+  const markAsRead = async (alertId: string) => {
+    try {
+      await fetch(`${API_BASE}/notifications/${alertId}/read`, { method: 'PUT' });
+      setAlerts(prev => prev.map(a => 
+        a.id === alertId ? { ...a, read: true } : a
+      ));
+    } catch (err) {
+      console.error('Failed to mark as read:', err);
+    }
+  };
+
+  const markAllAsRead = async () => {
+    if (!guard?.id) return;
+    try {
+      await fetch(`${API_BASE}/notifications/${guard.id}/read-all`, { method: 'PUT' });
+      setAlerts(prev => prev.map(a => ({ ...a, read: true })));
+    } catch (err) {
+      console.error('Failed to mark all as read:', err);
+    }
+  };
+
+  const unreadCount = alerts.filter(a => !a.read).length;
 
   const getAlertIcon = (type: Alert['type']) => {
     switch (type) {
@@ -88,23 +125,43 @@ export default function Alerts() {
               {unreadCount > 0 ? `${unreadCount} unread notifications` : 'All caught up!'}
             </p>
           </div>
-          <div className="relative">
-            <Bell className="w-6 h-6 text-foreground" />
+          <div className="flex items-center gap-3">
             {unreadCount > 0 && (
-              <span className="absolute -top-1 -right-1 w-4 h-4 bg-destructive rounded-full text-[10px] font-bold flex items-center justify-center">
-                {unreadCount}
-              </span>
+              <button
+                onClick={markAllAsRead}
+                className="text-xs text-primary hover:underline"
+              >
+                Mark all read
+              </button>
             )}
+            <div className="relative">
+              <Bell className="w-6 h-6 text-foreground" />
+              {unreadCount > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 bg-destructive rounded-full text-[10px] font-bold flex items-center justify-center">
+                  {unreadCount}
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
+        {/* Loading State */}
+        {isLoading && (
+          <div className="glass-card p-8 text-center">
+            <Loader2 className="w-8 h-8 text-primary mx-auto animate-spin mb-3" />
+            <p className="text-muted-foreground">Loading notifications...</p>
+          </div>
+        )}
+
         {/* Alerts List */}
+        {!isLoading && (
         <div className="space-y-3">
-          {mockAlerts.map((alert) => (
+          {alerts.map((alert) => (
             <div
               key={alert.id}
+              onClick={() => !alert.read && markAsRead(alert.id)}
               className={cn(
-                "glass-card p-4 transition-all",
+                "glass-card p-4 transition-all cursor-pointer",
                 !alert.read && "ring-1 ring-primary/30"
               )}
             >
@@ -137,8 +194,9 @@ export default function Alerts() {
             </div>
           ))}
         </div>
+        )}
 
-        {mockAlerts.length === 0 && (
+        {!isLoading && alerts.length === 0 && (
           <div className="glass-card p-8 text-center">
             <Bell className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
             <p className="text-muted-foreground">No notifications yet</p>

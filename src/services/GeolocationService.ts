@@ -165,48 +165,59 @@ export class LocationWatcher {
 // Singleton instance for app-wide location tracking
 export const locationWatcher = new LocationWatcher();
 
-// Mock patrol points for testing (Bangalore tech parks)
+/**
+ * DEMO FALLBACK PATROL POINTS
+ * 
+ * These patrol points are ONLY used when:
+ * 1. The guard's assigned site has no patrol route configured
+ * 2. The API is not reachable (offline mode)
+ * 
+ * In production, patrol routes should always be configured per-site
+ * via the admin platform (Sites > Manage Site > Patrol Route).
+ * 
+ * Location: Generic Bangalore tech park coordinates for demo purposes
+ */
 export const MOCK_PATROL_POINTS: PatrolPoint[] = [
   {
-    id: 'pp1',
-    siteId: 'site-1',
-    name: 'Main Gate',
+    id: 'demo-pp1',
+    siteId: 'demo-site',
+    name: 'Main Gate (Demo)',
     latitude: 12.9716,
     longitude: 77.5946,
     radiusMeters: 10,
     order: 1,
   },
   {
-    id: 'pp2',
-    siteId: 'site-1',
-    name: 'Parking Area A',
+    id: 'demo-pp2',
+    siteId: 'demo-site',
+    name: 'Parking Area A (Demo)',
     latitude: 12.9720,
     longitude: 77.5950,
     radiusMeters: 10,
     order: 2,
   },
   {
-    id: 'pp3',
-    siteId: 'site-1',
-    name: 'Building A Entrance',
+    id: 'demo-pp3',
+    siteId: 'demo-site',
+    name: 'Building A Entrance (Demo)',
     latitude: 12.9725,
     longitude: 77.5955,
     radiusMeters: 10,
     order: 3,
   },
   {
-    id: 'pp4',
-    siteId: 'site-1',
-    name: 'Fire Exit',
+    id: 'demo-pp4',
+    siteId: 'demo-site',
+    name: 'Fire Exit (Demo)',
     latitude: 12.9718,
     longitude: 77.5960,
     radiusMeters: 10,
     order: 4,
   },
   {
-    id: 'pp5',
-    siteId: 'site-1',
-    name: 'Loading Bay',
+    id: 'demo-pp5',
+    siteId: 'demo-site',
+    name: 'Loading Bay (Demo)',
     latitude: 12.9712,
     longitude: 77.5952,
     radiusMeters: 10,

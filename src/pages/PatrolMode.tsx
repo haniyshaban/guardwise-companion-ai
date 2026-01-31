@@ -75,7 +75,10 @@ export default function PatrolMode() {
         isCompleted: false,
       }));
     } else {
-      // Fallback to mock patrol points
+      // DEMO FALLBACK: Use demo patrol points when site has no configured route
+      // In production, sites should always have patrol routes configured via admin
+      console.warn('⚠️ No patrol route configured for site - using demo fallback points');
+      setSiteName('Demo Site');
       points = MOCK_PATROL_POINTS.map((point) => ({
         ...point,
         isCompleted: false,
@@ -159,21 +162,53 @@ export default function PatrolMode() {
 
       const withinRadius = distance <= point.radiusMeters;
 
-      // Create patrol log
-      const log: PatrolLog = {
-        id: `pl-${Date.now()}`,
+      // Create patrol log and persist to API
+      const logData = {
         guardId: guard?.id || '1',
+        siteId: site?.id || point.siteId,
         patrolPointId: point.id,
         patrolPointName: point.name,
         shiftId: guard?.currentShift?.id,
-        timestamp: new Date().toISOString(),
-        latitude: position.latitude,
-        longitude: position.longitude,
+        lat: position.latitude,
+        lng: position.longitude,
         withinRadius,
         distanceFromPoint: Math.round(distance),
       };
 
-      setPatrolLogs((prev) => [...prev, log]);
+      // Persist to API
+      try {
+        const res = await fetch('http://localhost:4000/api/patrol-logs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(logData),
+        });
+        
+        if (res.ok) {
+          const savedLog = await res.json();
+          setPatrolLogs((prev) => [...prev, savedLog]);
+        } else {
+          // Fallback to local log if API fails
+          const localLog: PatrolLog = {
+            id: `pl-${Date.now()}`,
+            ...logData,
+            latitude: position.latitude,
+            longitude: position.longitude,
+            timestamp: new Date().toISOString(),
+          };
+          setPatrolLogs((prev) => [...prev, localLog]);
+        }
+      } catch (apiErr) {
+        console.error('Failed to save patrol log to API:', apiErr);
+        // Fallback to local log
+        const localLog: PatrolLog = {
+          id: `pl-${Date.now()}`,
+          ...logData,
+          latitude: position.latitude,
+          longitude: position.longitude,
+          timestamp: new Date().toISOString(),
+        };
+        setPatrolLogs((prev) => [...prev, localLog]);
+      }
 
       // Update patrol point status
       setPatrolPoints((prev) =>

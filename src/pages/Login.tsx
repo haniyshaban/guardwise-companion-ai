@@ -1,10 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Shield, Scan, User, Lock, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { Scan, User, Lock, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/contexts/AuthContext';
 import { FacialScanner } from '@/components/FacialScanner';
+import api from '@/services/api';
+
+interface GuardFaceDescriptor {
+  id: string;
+  name: string;
+  descriptor: string;
+}
 
 export default function Login() {
   const navigate = useNavigate();
@@ -15,6 +22,28 @@ export default function Login() {
   const [isLoading, setIsLoading] = useState(false);
   const [showFacialScanner, setShowFacialScanner] = useState(false);
   const [error, setError] = useState('');
+  const [guardDescriptors, setGuardDescriptors] = useState<GuardFaceDescriptor[]>([]);
+  const [isLoadingDescriptors, setIsLoadingDescriptors] = useState(false);
+
+  // Fetch all guard face descriptors on mount
+  useEffect(() => {
+    const fetchDescriptors = async () => {
+      setIsLoadingDescriptors(true);
+      try {
+        const response = await api.get<GuardFaceDescriptor[]>('/auth/face-descriptors');
+        if (response.success && response.data) {
+          setGuardDescriptors(response.data);
+          console.log(`[Login] Loaded ${response.data.length} face descriptors for matching`);
+        }
+      } catch (err) {
+        console.error('[Login] Failed to load face descriptors:', err);
+      } finally {
+        setIsLoadingDescriptors(false);
+      }
+    };
+
+    fetchDescriptors();
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,12 +60,33 @@ export default function Login() {
     }
   };
 
-  const handleFacialLogin = async (success: boolean) => {
+  const handleFacialLoginStart = () => {
+    if (guardDescriptors.length === 0) {
+      setError('No registered faces found. Please use email/password login or enroll first.');
+      return;
+    }
+    setShowFacialScanner(true);
+  };
+
+  const handleFacialLogin = async (success: boolean, descriptor?: Float32Array) => {
     setShowFacialScanner(false);
+    if (!success) {
+      setError('Facial recognition failed. Please try again or use email/password login.');
+    }
+    // Success is handled by onMatchFound callback
+  };
+
+  const handleFaceMatchFound = async (guardId: string, distance: number) => {
+    console.log(`[Login] Face matched guard ${guardId} with distance ${distance.toFixed(3)}`);
+    setIsLoading(true);
+    
+    const success = await loginWithFace(guardId);
+    setIsLoading(false);
+    
     if (success) {
       navigate('/dashboard');
     } else {
-      setError('Facial recognition failed. Please try again.');
+      setError('Login failed. Please try again.');
     }
   };
 
@@ -45,12 +95,12 @@ export default function Login() {
       {/* Header */}
       <div className="p-6 pt-12">
         <div className="flex items-center justify-center gap-3 mb-2">
-          <div className="w-12 h-12 rounded-xl gradient-primary flex items-center justify-center glow-primary">
-            <Shield className="w-7 h-7 text-primary-foreground" />
+          <div className="w-12 h-12 rounded-xl gradient-primary flex items-center justify-center glow-primary overflow-hidden">
+            <img src="/favicon.ico" alt="GuardSync" className="w-8 h-8" />
           </div>
         </div>
         <h1 className="text-3xl font-bold text-center text-foreground">
-          Guard<span className="text-gradient">Wise</span>
+          Guard<span className="text-gradient">Sync</span>
         </h1>
         <p className="text-center text-muted-foreground mt-1">Security Guard Portal</p>
       </div>
@@ -60,18 +110,31 @@ export default function Login() {
         {/* Facial Recognition Button */}
         <div className="mb-8">
           <button
-            onClick={() => setShowFacialScanner(true)}
-            className="w-full glass-card p-6 flex flex-col items-center gap-4 hover:bg-white/10 transition-all duration-300 group"
+            onClick={handleFacialLoginStart}
+            disabled={isLoadingDescriptors || guardDescriptors.length === 0}
+            className="w-full glass-card p-6 flex flex-col items-center gap-4 hover:bg-white/10 transition-all duration-300 group disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <div className="relative">
               <div className="w-20 h-20 rounded-full bg-secondary flex items-center justify-center group-hover:bg-primary/20 transition-colors">
-                <Scan className="w-10 h-10 text-primary" />
+                {isLoadingDescriptors ? (
+                  <Loader2 className="w-10 h-10 text-primary animate-spin" />
+                ) : (
+                  <Scan className="w-10 h-10 text-primary" />
+                )}
               </div>
-              <div className="absolute inset-0 rounded-full border-2 border-primary/50 animate-pulse" />
+              {!isLoadingDescriptors && guardDescriptors.length > 0 && (
+                <div className="absolute inset-0 rounded-full border-2 border-primary/50 animate-pulse" />
+              )}
             </div>
             <div className="text-center">
               <p className="font-semibold text-foreground">Face Recognition Login</p>
-              <p className="text-sm text-muted-foreground">Quick & secure authentication</p>
+              <p className="text-sm text-muted-foreground">
+                {isLoadingDescriptors 
+                  ? 'Loading face data...' 
+                  : guardDescriptors.length > 0 
+                    ? 'Quick & secure authentication' 
+                    : 'No faces enrolled yet'}
+              </p>
             </div>
           </button>
         </div>
@@ -97,7 +160,7 @@ export default function Login() {
               <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
               <Input
                 type="email"
-                placeholder="you@guardwise.com"
+                placeholder="you@guardsync.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="pl-10 h-12 bg-secondary border-border focus:border-primary"
@@ -163,8 +226,12 @@ export default function Login() {
       {/* Facial Scanner Modal */}
       {showFacialScanner && (
         <FacialScanner
+          mode="verify"
+          guardDescriptors={guardDescriptors.map(g => ({ id: g.id, descriptor: g.descriptor }))}
+          matchThreshold={0.6}
           onScanComplete={handleFacialLogin}
           onCancel={() => setShowFacialScanner(false)}
+          onMatchFound={handleFaceMatchFound}
         />
       )}
     </div>

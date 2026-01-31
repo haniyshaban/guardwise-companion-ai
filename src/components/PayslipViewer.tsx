@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Download,
   Calendar,
@@ -10,6 +10,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Printer,
+  Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -24,47 +25,34 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Guard, PayrollRecord, AttendanceLog } from '@/types/guard';
 
+// API Base URL
+const API_BASE_URL = 'http://localhost:4000';
+
 interface PayslipViewerProps {
   guard: Guard;
 }
 
-// Mock payroll data
-const generateMockPayroll = (guard: Guard, month: number, year: number): PayrollRecord => {
-  const daysInMonth = new Date(year, month, 0).getDate();
-  const totalDaysWorked = Math.floor(Math.random() * 4) + (daysInMonth - 4); // 4 days variance
-  const dailyRate = guard.dailyRate || 800;
-  const grossPay = totalDaysWorked * dailyRate;
-  const uniformDeduction = guard.uniformInstallments?.monthlyDeduction || 0;
-  const pfDeduction = Math.round(grossPay * 0.12); // 12% PF
-  const netPay = grossPay - uniformDeduction - pfDeduction;
+// Attendance summary type
+interface AttendanceSummary {
+  totalDays: number;
+  present: number;
+  absent: number;
+  weeklyOff: number;
+  late: number;
+  overtime: number;
+}
 
-  return {
-    id: `payroll-${guard.id}-${month}-${year}`,
-    guardId: guard.id,
-    guardName: guard.name,
-    month,
-    year,
-    totalDaysWorked,
-    dailyRate,
-    grossPay,
-    uniformDeduction,
-    otherDeductions: pfDeduction,
-    netPay,
-    generatedAt: new Date().toISOString(),
-    status: 'finalized',
-  };
-};
-
-// Mock attendance summary
-const generateAttendanceSummary = (daysWorked: number, month: number, year: number) => {
+// Calculate attendance summary from payroll data
+const calculateAttendanceSummary = (daysWorked: number, month: number, year: number): AttendanceSummary => {
   const daysInMonth = new Date(year, month, 0).getDate();
+  const weeklyOffs = Math.floor(daysInMonth / 7); // ~4 weekly offs
   return {
     totalDays: daysInMonth,
     present: daysWorked,
-    absent: daysInMonth - daysWorked - 4, // Assuming 4 weekly offs
-    weeklyOff: 4,
-    late: Math.floor(Math.random() * 3),
-    overtime: Math.floor(Math.random() * 5),
+    absent: Math.max(0, daysInMonth - daysWorked - weeklyOffs),
+    weeklyOff: weeklyOffs,
+    late: 0, // Would need separate tracking
+    overtime: 0, // Would need separate tracking
   };
 };
 
@@ -72,10 +60,39 @@ export function PayslipViewer({ guard }: PayslipViewerProps) {
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [payroll, setPayroll] = useState<PayrollRecord | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
   const payslipRef = useRef<HTMLDivElement>(null);
 
-  const payroll = generateMockPayroll(guard, selectedMonth, selectedYear);
-  const attendance = generateAttendanceSummary(payroll.totalDaysWorked, selectedMonth, selectedYear);
+  // Fetch payroll from API when month/year changes or dialog opens
+  useEffect(() => {
+    if (!isDialogOpen || !guard?.id) return;
+    
+    const fetchPayroll = async () => {
+      setIsLoading(true);
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/payroll/${guard.id}/${selectedMonth}/${selectedYear}`);
+        if (res.ok) {
+          const data = await res.json();
+          setPayroll(data);
+        } else {
+          // If no payroll exists, the API will create one
+          console.log('Payroll fetch failed');
+        }
+      } catch (err) {
+        console.error('Failed to fetch payroll:', err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    fetchPayroll();
+  }, [guard?.id, selectedMonth, selectedYear, isDialogOpen]);
+
+  // Calculate attendance from payroll data
+  const attendance = payroll 
+    ? calculateAttendanceSummary(payroll.totalDaysWorked, selectedMonth, selectedYear)
+    : calculateAttendanceSummary(0, selectedMonth, selectedYear);
 
   const monthNames = [
     'January', 'February', 'March', 'April', 'May', 'June',
@@ -107,154 +124,154 @@ export function PayslipViewer({ guard }: PayslipViewerProps) {
 
   // Simple PDF-like print functionality
   const handleDownloadPDF = () => {
-    if (payslipRef.current) {
-      const printWindow = window.open('', '_blank');
-      if (printWindow) {
-        printWindow.document.write(`
-          <html>
-            <head>
-              <title>Payslip - ${monthNames[selectedMonth - 1]} ${selectedYear}</title>
-              <style>
-                body {
-                  font-family: Arial, sans-serif;
-                  padding: 40px;
-                  max-width: 800px;
-                  margin: 0 auto;
-                }
-                .header {
-                  text-align: center;
-                  margin-bottom: 30px;
-                  border-bottom: 2px solid #333;
-                  padding-bottom: 20px;
-                }
-                .company-name {
-                  font-size: 24px;
-                  font-weight: bold;
-                  color: #1a365d;
-                }
-                .payslip-title {
-                  font-size: 18px;
-                  margin-top: 10px;
-                  color: #666;
-                }
-                .section {
-                  margin-bottom: 20px;
-                }
-                .section-title {
-                  font-size: 14px;
-                  font-weight: bold;
-                  color: #1a365d;
-                  border-bottom: 1px solid #ddd;
-                  padding-bottom: 5px;
-                  margin-bottom: 10px;
-                }
-                .row {
-                  display: flex;
-                  justify-content: space-between;
-                  padding: 5px 0;
-                }
-                .label {
-                  color: #666;
-                }
-                .value {
-                  font-weight: 500;
-                }
-                .total-row {
-                  border-top: 2px solid #333;
-                  margin-top: 10px;
-                  padding-top: 10px;
-                  font-size: 18px;
-                  font-weight: bold;
-                }
-                .footer {
-                  margin-top: 40px;
-                  text-align: center;
-                  color: #666;
-                  font-size: 12px;
-                }
-                @media print {
-                  body { padding: 20px; }
-                }
-              </style>
-            </head>
-            <body>
-              <div class="header">
-                <div class="company-name">GuardWise Security Services</div>
-                <div class="payslip-title">Payslip for ${monthNames[selectedMonth - 1]} ${selectedYear}</div>
+    if (!payroll || !payslipRef.current) return;
+    
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(`
+        <html>
+          <head>
+            <title>Payslip - ${monthNames[selectedMonth - 1]} ${selectedYear}</title>
+            <style>
+              body {
+                font-family: Arial, sans-serif;
+                padding: 40px;
+                max-width: 800px;
+                margin: 0 auto;
+              }
+              .header {
+                text-align: center;
+                margin-bottom: 30px;
+                border-bottom: 2px solid #333;
+                padding-bottom: 20px;
+              }
+              .company-name {
+                font-size: 24px;
+                font-weight: bold;
+                color: #1a365d;
+              }
+              .payslip-title {
+                font-size: 18px;
+                margin-top: 10px;
+                color: #666;
+              }
+              .section {
+                margin-bottom: 20px;
+              }
+              .section-title {
+                font-size: 14px;
+                font-weight: bold;
+                color: #1a365d;
+                border-bottom: 1px solid #ddd;
+                padding-bottom: 5px;
+                margin-bottom: 10px;
+              }
+              .row {
+                display: flex;
+                justify-content: space-between;
+                padding: 5px 0;
+              }
+              .label {
+                color: #666;
+              }
+              .value {
+                font-weight: 500;
+              }
+              .total-row {
+                border-top: 2px solid #333;
+                margin-top: 10px;
+                padding-top: 10px;
+                font-size: 18px;
+                font-weight: bold;
+              }
+              .footer {
+                margin-top: 40px;
+                text-align: center;
+                color: #666;
+                font-size: 12px;
+              }
+              @media print {
+                body { padding: 20px; }
+              }
+            </style>
+          </head>
+          <body>
+            <div class="header">
+              <div class="company-name">GuardSync Security Services</div>
+              <div class="payslip-title">Payslip for ${monthNames[selectedMonth - 1]} ${selectedYear}</div>
+            </div>
+            
+            <div class="section">
+              <div class="section-title">Employee Details</div>
+              <div class="row">
+                <span class="label">Employee Name</span>
+                <span class="value">${guard.name}</span>
               </div>
-              
-              <div class="section">
-                <div class="section-title">Employee Details</div>
-                <div class="row">
-                  <span class="label">Employee Name</span>
-                  <span class="value">${guard.name}</span>
-                </div>
-                <div class="row">
-                  <span class="label">Employee ID</span>
-                  <span class="value">${guard.employeeId}</span>
-                </div>
-                <div class="row">
-                  <span class="label">Department</span>
-                  <span class="value">Security Services</span>
-                </div>
-                <div class="row">
-                  <span class="label">Bank Account</span>
-                  <span class="value">****${guard.bankDetails?.accountNumber?.slice(-4) || 'N/A'}</span>
-                </div>
+              <div class="row">
+                <span class="label">Employee ID</span>
+                <span class="value">${guard.employeeId}</span>
               </div>
-              
-              <div class="section">
-                <div class="section-title">Attendance Summary</div>
-                <div class="row">
-                  <span class="label">Days Worked</span>
-                  <span class="value">${attendance.present}</span>
-                </div>
-                <div class="row">
-                  <span class="label">Weekly Off</span>
-                  <span class="value">${attendance.weeklyOff}</span>
-                </div>
-                <div class="row">
-                  <span class="label">Absent</span>
-                  <span class="value">${attendance.absent}</span>
-                </div>
+              <div class="row">
+                <span class="label">Department</span>
+                <span class="value">Security Services</span>
               </div>
-              
-              <div class="section">
-                <div class="section-title">Earnings</div>
-                <div class="row">
-                  <span class="label">Basic Pay (${payroll.totalDaysWorked} days × ₹${payroll.dailyRate})</span>
-                  <span class="value">₹${payroll.grossPay.toLocaleString('en-IN')}</span>
-                </div>
+              <div class="row">
+                <span class="label">Bank Account</span>
+                <span class="value">****${guard.bankDetails?.accountNumber?.slice(-4) || 'N/A'}</span>
               </div>
-              
-              <div class="section">
-                <div class="section-title">Deductions</div>
-                <div class="row">
-                  <span class="label">Uniform EMI</span>
-                  <span class="value">₹${payroll.uniformDeduction.toLocaleString('en-IN')}</span>
-                </div>
-                <div class="row">
-                  <span class="label">PF Contribution (12%)</span>
-                  <span class="value">₹${payroll.otherDeductions.toLocaleString('en-IN')}</span>
-                </div>
+            </div>
+            
+            <div class="section">
+              <div class="section-title">Attendance Summary</div>
+              <div class="row">
+                <span class="label">Days Worked</span>
+                <span class="value">${attendance.present}</span>
               </div>
-              
-              <div class="row total-row">
-                <span>Net Payable</span>
-                <span>₹${payroll.netPay.toLocaleString('en-IN')}</span>
+              <div class="row">
+                <span class="label">Weekly Off</span>
+                <span class="value">${attendance.weeklyOff}</span>
               </div>
-              
-              <div class="footer">
-                <p>This is a computer-generated payslip and does not require signature.</p>
-                <p>Generated on ${new Date().toLocaleDateString('en-IN')}</p>
+              <div class="row">
+                <span class="label">Absent</span>
+                <span class="value">${attendance.absent}</span>
               </div>
+            </div>
+            
+            <div class="section">
+              <div class="section-title">Earnings</div>
+              <div class="row">
+                <span class="label">Basic Pay (${payroll.totalDaysWorked} days × ₹${payroll.dailyRate})</span>
+                <span class="value">₹${payroll.grossPay.toLocaleString('en-IN')}</span>
+              </div>
+            </div>
+            
+            <div class="section">
+              <div class="section-title">Deductions</div>
+              <div class="row">
+                <span class="label">Uniform EMI</span>
+                <span class="value">₹${(payroll.uniformDeduction || 0).toLocaleString('en-IN')}</span>
+              </div>
+              <div class="row">
+                <span class="label">PF Contribution (12%)</span>
+                <span class="value">₹${(payroll.pfDeduction || payroll.otherDeductions || 0).toLocaleString('en-IN')}</span>
+              </div>
+            </div>
+            
+            <div class="row total-row">
+              <span>Net Payable</span>
+              <span>₹${payroll.netPay.toLocaleString('en-IN')}</span>
+            </div>
+            
+            <div class="footer">
+              <p>This is a computer-generated payslip and does not require signature.</p>
+              <p>Generated on ${new Date().toLocaleDateString('en-IN')}</p>
+            </div>
             </body>
           </html>
         `);
         printWindow.document.close();
         printWindow.print();
       }
-    }
   };
 
   return (
@@ -304,6 +321,17 @@ export function PayslipViewer({ guard }: PayslipViewerProps) {
         </div>
 
         {/* Payslip Content */}
+        {isLoading ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="w-8 h-8 animate-spin text-primary" />
+            <span className="ml-2 text-muted-foreground">Loading payslip...</span>
+          </div>
+        ) : !payroll ? (
+          <div className="text-center py-8 text-muted-foreground">
+            <p>No payroll data available for this month.</p>
+            <p className="text-sm mt-2">Payroll is generated based on attendance records.</p>
+          </div>
+        ) : (
         <div ref={payslipRef} className="space-y-4">
           {/* Employee Info */}
           <Card>
@@ -395,25 +423,25 @@ export function PayslipViewer({ guard }: PayslipViewerProps) {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2 py-2">
-              {payroll.uniformDeduction > 0 && (
+              {(payroll.uniformDeduction || 0) > 0 && (
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Uniform EMI</span>
                   <span className="text-destructive">
-                    -₹{payroll.uniformDeduction.toLocaleString('en-IN')}
+                    -₹{(payroll.uniformDeduction || 0).toLocaleString('en-IN')}
                   </span>
                 </div>
               )}
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">PF Contribution (12%)</span>
                 <span className="text-destructive">
-                  -₹{payroll.otherDeductions.toLocaleString('en-IN')}
+                  -₹{(payroll.pfDeduction || payroll.otherDeductions || 0).toLocaleString('en-IN')}
                 </span>
               </div>
               <Separator />
               <div className="flex justify-between text-sm font-semibold">
                 <span>Total Deductions</span>
                 <span className="text-destructive">
-                  -₹{(payroll.uniformDeduction + payroll.otherDeductions).toLocaleString('en-IN')}
+                  -₹{((payroll.uniformDeduction || 0) + (payroll.pfDeduction || payroll.otherDeductions || 0)).toLocaleString('en-IN')}
                 </span>
               </div>
             </CardContent>
@@ -430,7 +458,7 @@ export function PayslipViewer({ guard }: PayslipViewerProps) {
                   </p>
                 </div>
                 <Badge variant="outline" className="text-primary border-primary">
-                  {payroll.status === 'paid' ? 'Paid' : 'Finalized'}
+                  {payroll.status === 'paid' ? 'Paid' : payroll.status === 'finalized' ? 'Finalized' : 'Pending'}
                 </Badge>
               </div>
             </CardContent>
@@ -443,9 +471,10 @@ export function PayslipViewer({ guard }: PayslipViewerProps) {
             </div>
           )}
         </div>
+        )}
 
         {/* Download Button */}
-        <Button variant="gradient" className="w-full mt-4" onClick={handleDownloadPDF}>
+        <Button variant="gradient" className="w-full mt-4" onClick={handleDownloadPDF} disabled={!payroll || isLoading}>
           <Printer className="w-4 h-4 mr-2" />
           Download / Print Payslip
         </Button>

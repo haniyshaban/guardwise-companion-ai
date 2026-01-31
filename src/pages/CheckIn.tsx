@@ -1,17 +1,22 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Camera, MapPin, Clock, CheckCircle, ArrowLeft, Scan } from 'lucide-react';
+import { Camera, MapPin, Clock, CheckCircle, ArrowLeft, Scan, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { FacialScanner } from '@/components/FacialScanner';
 import { useAuth } from '@/contexts/AuthContext';
 import { BottomNav } from '@/components/BottomNav';
+import { useToast } from '@/hooks/use-toast';
 
-type CheckInStep = 'confirm' | 'scanning' | 'success';
+type CheckInStep = 'confirm' | 'scanning' | 'submitting' | 'success';
+
+const API_BASE = 'http://localhost:4000/api';
 
 export default function CheckIn() {
   const navigate = useNavigate();
-  const { guard } = useAuth();
+  const { guard, site } = useAuth();
+  const { toast } = useToast();
   const [step, setStep] = useState<CheckInStep>('confirm');
+  const [checkInTime, setCheckInTime] = useState<string>('');
 
   const currentTime = new Date().toLocaleTimeString('en-US', {
     hour: '2-digit',
@@ -20,10 +25,103 @@ export default function CheckIn() {
     hour12: true,
   });
 
-  const handleScanComplete = (success: boolean) => {
+  const handleScanComplete = async (success: boolean) => {
     if (success) {
-      setStep('success');
+      setStep('submitting');
+      try {
+        // Get current position for geofence check
+        let lat: number | undefined;
+        let lng: number | undefined;
+        let withinGeofence = true;
+
+        try {
+          const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+              enableHighAccuracy: true,
+              timeout: 10000,
+            });
+          });
+          lat = position.coords.latitude;
+          lng = position.coords.longitude;
+
+          // Check if within geofence (simple radius check)
+          if (site?.location && site?.geofenceRadius) {
+            const distance = calculateDistance(lat, lng, site.location.lat, site.location.lng);
+            withinGeofence = distance <= site.geofenceRadius;
+          }
+        } catch (geoErr) {
+          console.warn('Could not get location:', geoErr);
+        }
+
+        // Log attendance to API
+        const res = await fetch(`${API_BASE}/attendance/clock-in`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            guardId: guard?.id,
+            siteId: site?.id || guard?.currentShift?.siteId,
+            lat,
+            lng,
+            withinGeofence,
+          }),
+        });
+
+        if (!res.ok) {
+          throw new Error('Failed to log check-in');
+        }
+
+        // Create notification for successful check-in
+        await fetch(`${API_BASE}/notifications`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            guardId: guard?.id,
+            type: 'success',
+            title: 'Check-in Confirmed',
+            message: `Successfully checked in at ${guard?.currentShift?.location || site?.name || 'your site'}.`,
+          }),
+        });
+
+        setCheckInTime(new Date().toLocaleTimeString('en-US', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: true,
+        }));
+        setStep('success');
+
+        toast({
+          title: 'Check-in Successful',
+          description: withinGeofence 
+            ? 'Your attendance has been logged.' 
+            : 'Logged, but you are outside the geofence.',
+        });
+      } catch (err) {
+        console.error('Check-in error:', err);
+        toast({
+          title: 'Check-in Failed',
+          description: 'Could not log your attendance. Please try again.',
+          variant: 'destructive',
+        });
+        setStep('confirm');
+      }
     }
+  };
+
+  // Simple distance calculation (Haversine formula)
+  const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+    const R = 6371e3; // Earth's radius in meters
+    const φ1 = (lat1 * Math.PI) / 180;
+    const φ2 = (lat2 * Math.PI) / 180;
+    const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+    const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+
+    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+              Math.cos(φ1) * Math.cos(φ2) *
+              Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return R * c;
   };
 
   if (step === 'scanning') {
@@ -32,6 +130,18 @@ export default function CheckIn() {
         onScanComplete={handleScanComplete}
         onCancel={() => setStep('confirm')}
       />
+    );
+  }
+
+  if (step === 'submitting') {
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6">
+        <div className="text-center">
+          <Loader2 className="w-16 h-16 text-primary mx-auto animate-spin mb-6" />
+          <h1 className="text-2xl font-bold text-foreground mb-2">Logging Attendance...</h1>
+          <p className="text-muted-foreground">Please wait</p>
+        </div>
+      </div>
     );
   }
 
@@ -44,7 +154,7 @@ export default function CheckIn() {
           </div>
           <h1 className="text-3xl font-bold text-foreground mb-2">Checked In!</h1>
           <p className="text-muted-foreground mb-2">Your shift has started</p>
-          <p className="text-2xl font-mono text-primary">{currentTime}</p>
+          <p className="text-2xl font-mono text-primary">{checkInTime || currentTime}</p>
         </div>
 
         <div className="glass-card p-5 w-full max-w-sm mt-8">

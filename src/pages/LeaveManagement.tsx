@@ -36,52 +36,15 @@ import { BottomNav } from '@/components/BottomNav';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { LeaveRequest } from '@/types/guard';
-
-// Mock leave requests data
-const mockLeaveRequests: LeaveRequest[] = [
-  {
-    id: 'lr1',
-    guardId: '1',
-    startDate: '2026-02-10',
-    endDate: '2026-02-12',
-    reason: 'Family function - Sister wedding',
-    leaveType: 'casual',
-    status: 'approved',
-    appliedAt: '2026-01-25T10:30:00Z',
-    reviewedAt: '2026-01-26T09:00:00Z',
-    reviewedBy: 'Admin',
-  },
-  {
-    id: 'lr2',
-    guardId: '1',
-    startDate: '2026-02-20',
-    endDate: '2026-02-21',
-    reason: 'Not feeling well, need rest',
-    leaveType: 'sick',
-    status: 'pending',
-    appliedAt: '2026-01-29T14:00:00Z',
-  },
-  {
-    id: 'lr3',
-    guardId: '1',
-    startDate: '2026-01-05',
-    endDate: '2026-01-05',
-    reason: 'Personal work',
-    leaveType: 'casual',
-    status: 'rejected',
-    appliedAt: '2026-01-02T08:00:00Z',
-    reviewedAt: '2026-01-03T11:00:00Z',
-    reviewedBy: 'Admin',
-    adminNotes: 'Critical shift coverage needed',
-  },
-];
+import api from '@/services/api';
 
 export default function LeaveManagement() {
   const navigate = useNavigate();
   const { guard } = useAuth();
   const { toast } = useToast();
 
-  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>(mockLeaveRequests);
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -92,6 +55,32 @@ export default function LeaveManagement() {
     reason: '',
     leaveType: 'casual' as LeaveRequest['leaveType'],
   });
+
+  // Fetch leave requests from API
+  useEffect(() => {
+    const fetchLeaveRequests = async () => {
+      if (!guard?.id) return;
+      
+      setIsLoading(true);
+      try {
+        const response = await api.get<LeaveRequest[]>(`/leave-requests?guardId=${guard.id}`);
+        if (response.success && response.data) {
+          setLeaveRequests(response.data);
+        }
+      } catch (error) {
+        console.error('Failed to fetch leave requests:', error);
+        toast({
+          title: 'Error',
+          description: 'Failed to load leave history',
+          variant: 'destructive',
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchLeaveRequests();
+  }, [guard?.id]);
 
   const getStatusColor = (status: LeaveRequest['status']) => {
     switch (status) {
@@ -171,28 +160,27 @@ export default function LeaveManagement() {
 
     setIsSubmitting(true);
     try {
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      const newRequest: LeaveRequest = {
-        id: `lr${Date.now()}`,
-        guardId: guard?.id || '1',
+      // Submit to API
+      const response = await api.post<LeaveRequest>('/leave-requests', {
+        guardId: guard?.id,
         startDate: newLeave.startDate,
         endDate: newLeave.endDate,
         reason: newLeave.reason,
         leaveType: newLeave.leaveType,
-        status: 'pending',
-        appliedAt: new Date().toISOString(),
-      };
-
-      setLeaveRequests([newRequest, ...leaveRequests]);
-      setNewLeave({ startDate: '', endDate: '', reason: '', leaveType: 'casual' });
-      setIsDialogOpen(false);
-
-      toast({
-        title: 'Leave Request Submitted',
-        description: 'Your leave request is pending approval',
       });
+
+      if (response.success && response.data) {
+        setLeaveRequests([response.data, ...leaveRequests]);
+        setNewLeave({ startDate: '', endDate: '', reason: '', leaveType: 'casual' });
+        setIsDialogOpen(false);
+
+        toast({
+          title: 'Leave Request Submitted',
+          description: 'Your leave request is pending approval',
+        });
+      } else {
+        throw new Error(response.error || 'Failed to submit');
+      }
     } catch (error) {
       toast({
         title: 'Submission Failed',
@@ -206,12 +194,16 @@ export default function LeaveManagement() {
 
   const handleCancelRequest = async (id: string) => {
     try {
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      setLeaveRequests(leaveRequests.filter((lr) => lr.id !== id));
-      toast({
-        title: 'Request Cancelled',
-        description: 'Your leave request has been cancelled',
-      });
+      const response = await api.delete(`/leave-requests/${id}`);
+      if (response.success) {
+        setLeaveRequests(leaveRequests.filter((lr) => lr.id !== id));
+        toast({
+          title: 'Request Cancelled',
+          description: 'Your leave request has been cancelled',
+        });
+      } else {
+        throw new Error('Failed to cancel');
+      }
     } catch (error) {
       toast({
         title: 'Failed to Cancel',
